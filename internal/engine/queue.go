@@ -289,4 +289,3 @@ func (q *IntelligentBuildQueue) sortQueue() {
 		}
 	}
 }
-

@@ -14,7 +14,7 @@ import (
 func TestLoadConfig_JSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	// Create test config
 	testConfig := map[string]interface{}{
 		"version":     "1.0",
@@ -29,25 +29,25 @@ func TestLoadConfig_JSON(t *testing.T) {
 			},
 		},
 	}
-	
+
 	data, _ := json.Marshal(testConfig)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	// Load config
 	manager := config.NewManager()
 	cfg, err := manager.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
-	
+
 	if cfg.Version != "1.0" {
 		t.Errorf("expected version 1.0, got %s", cfg.Version)
 	}
-	
+
 	if cfg.ProjectType != types.ProjectTypeMixed {
 		t.Errorf("expected project type mixed, got %s", cfg.ProjectType)
 	}
-	
+
 	if len(cfg.Targets) != 1 {
 		t.Errorf("expected 1 target, got %d", len(cfg.Targets))
 	}
@@ -56,7 +56,7 @@ func TestLoadConfig_JSON(t *testing.T) {
 func TestLoadConfig_YAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "poltergeist.config.yaml")
-	
+
 	// Create test config
 	testConfig := map[string]interface{}{
 		"version":     "1.0",
@@ -70,17 +70,17 @@ func TestLoadConfig_YAML(t *testing.T) {
 			},
 		},
 	}
-	
+
 	data, _ := yaml.Marshal(testConfig)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	// Load config
 	manager := config.NewManager()
 	cfg, err := manager.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("failed to load YAML config: %v", err)
 	}
-	
+
 	if cfg.ProjectType != types.ProjectType("python") {
 		t.Errorf("expected project type python, got %s", cfg.ProjectType)
 	}
@@ -88,7 +88,7 @@ func TestLoadConfig_YAML(t *testing.T) {
 
 func TestValidateConfig(t *testing.T) {
 	manager := config.NewManager()
-	
+
 	tests := []struct {
 		name    string
 		config  *types.PoltergeistConfig
@@ -192,14 +192,14 @@ func TestValidateConfig(t *testing.T) {
 			errMsg:  "no watch paths defined",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := manager.ValidateConfig(tt.config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			
+
 			if err != nil && tt.errMsg != "" {
 				if !contains(err.Error(), tt.errMsg) {
 					t.Errorf("expected error containing '%s', got '%s'", tt.errMsg, err.Error())
@@ -211,7 +211,7 @@ func TestValidateConfig(t *testing.T) {
 
 func TestGetDefaultConfig(t *testing.T) {
 	manager := config.NewManager()
-	
+
 	projectTypes := []types.ProjectType{
 		types.ProjectTypeSwift,
 		types.ProjectTypeNode,
@@ -220,26 +220,26 @@ func TestGetDefaultConfig(t *testing.T) {
 		types.ProjectTypeCMake,
 		types.ProjectTypeMixed,
 	}
-	
+
 	for _, pt := range projectTypes {
 		cfg := manager.GetDefaultConfig(pt)
-		
+
 		if cfg.Version != "1.0" {
 			t.Errorf("expected version 1.0 for %s, got %s", pt, cfg.Version)
 		}
-		
+
 		if cfg.ProjectType != pt {
 			t.Errorf("expected project type %s, got %s", pt, cfg.ProjectType)
 		}
-		
+
 		if cfg.Watchman == nil {
 			t.Errorf("expected watchman config for %s", pt)
 		}
-		
+
 		if cfg.Performance == nil {
 			t.Errorf("expected performance config for %s", pt)
 		}
-		
+
 		if cfg.BuildScheduling == nil {
 			t.Errorf("expected build scheduling config for %s", pt)
 		}
@@ -248,18 +248,18 @@ func TestGetDefaultConfig(t *testing.T) {
 
 func TestLoadConfig_InvalidFile(t *testing.T) {
 	manager := config.NewManager()
-	
+
 	// Non-existent file
 	_, err := manager.LoadConfig("/non/existent/file.json")
 	if err == nil {
 		t.Error("expected error for non-existent file")
 	}
-	
+
 	// Invalid JSON
 	tmpDir := t.TempDir()
 	invalidPath := filepath.Join(tmpDir, "invalid.json")
 	os.WriteFile(invalidPath, []byte("not json"), 0644)
-	
+
 	_, err = manager.LoadConfig(invalidPath)
 	if err == nil {
 		t.Error("expected error for invalid JSON")
@@ -269,7 +269,7 @@ func TestLoadConfig_InvalidFile(t *testing.T) {
 func TestLoadConfig_ComplexConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "complex.json")
-	
+
 	// Create complex config with all features
 	complexConfig := `{
 		"version": "1.0",
@@ -340,37 +340,37 @@ func TestLoadConfig_ComplexConfig(t *testing.T) {
 			"level": "debug"
 		}
 	}`
-	
+
 	os.WriteFile(configPath, []byte(complexConfig), 0644)
-	
+
 	// Load and validate
 	manager := config.NewManager()
 	cfg, err := manager.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("failed to load complex config: %v", err)
 	}
-	
+
 	// Verify all sections loaded
 	if len(cfg.Targets) != 3 {
 		t.Errorf("expected 3 targets, got %d", len(cfg.Targets))
 	}
-	
+
 	if cfg.Watchman == nil || cfg.Watchman.SettlingDelay != 200 {
 		t.Error("watchman config not loaded correctly")
 	}
-	
+
 	if cfg.Performance == nil || cfg.Performance.Profile != types.PerformanceProfileBalanced {
 		t.Error("performance config not loaded correctly")
 	}
-	
+
 	if cfg.BuildScheduling == nil || cfg.BuildScheduling.Parallelization != 4 {
 		t.Error("build scheduling config not loaded correctly")
 	}
-	
+
 	if cfg.Notifications == nil || cfg.Notifications.Enabled == nil || !*cfg.Notifications.Enabled {
 		t.Error("notifications config not loaded correctly")
 	}
-	
+
 	if cfg.Logging == nil || cfg.Logging.Level != types.LogLevelDebug {
 		t.Error("logging config not loaded correctly")
 	}
@@ -379,7 +379,7 @@ func TestLoadConfig_ComplexConfig(t *testing.T) {
 func TestDefaultExclusions(t *testing.T) {
 	manager := config.NewManager()
 	cfg := manager.GetDefaultConfig(types.ProjectTypeMixed)
-	
+
 	expectedExclusions := []string{
 		"node_modules",
 		".git",
@@ -387,7 +387,7 @@ func TestDefaultExclusions(t *testing.T) {
 		"dist",
 		"target",
 	}
-	
+
 	for _, exclusion := range expectedExclusions {
 		found := false
 		for _, dir := range cfg.Watchman.ExcludeDirs {
@@ -404,6 +404,6 @@ func TestDefaultExclusions(t *testing.T) {
 
 // Helper function
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr || 
-		   len(s) > len(substr) && contains(s[1:], substr)
+	return len(s) >= len(substr) && s[:len(substr)] == substr ||
+		len(s) > len(substr) && contains(s[1:], substr)
 }

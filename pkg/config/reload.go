@@ -17,17 +17,17 @@ import (
 
 // ReloadManager handles configuration hot-reload functionality
 type ReloadManager struct {
-	configPath      string
-	logger          logger.Logger
-	watcher         *fsnotify.Watcher
-	callbacks       []ReloadCallback
-	lastModTime     time.Time
-	debounceTimer   *time.Timer
-	debouncePeriod  time.Duration
-	mu              sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
-	isWatching      bool
+	configPath     string
+	logger         logger.Logger
+	watcher        *fsnotify.Watcher
+	callbacks      []ReloadCallback
+	lastModTime    time.Time
+	debounceTimer  *time.Timer
+	debouncePeriod time.Duration
+	mu             sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	isWatching     bool
 }
 
 // ReloadCallback is called when configuration changes
@@ -35,11 +35,11 @@ type ReloadCallback func(*types.PoltergeistConfig, error)
 
 // ReloadEvent represents a configuration reload event
 type ReloadEvent struct {
-	Path      string                     `json:"path"`
-	Timestamp time.Time                  `json:"timestamp"`
-	Config    *types.PoltergeistConfig   `json:"config,omitempty"`
-	Error     error                      `json:"error,omitempty"`
-	EventType ReloadEventType            `json:"eventType"`
+	Path      string                   `json:"path"`
+	Timestamp time.Time                `json:"timestamp"`
+	Config    *types.PoltergeistConfig `json:"config,omitempty"`
+	Error     error                    `json:"error,omitempty"`
+	EventType ReloadEventType          `json:"eventType"`
 }
 
 // ReloadEventType represents the type of reload event
@@ -55,7 +55,7 @@ const (
 // NewReloadManager creates a new configuration reload manager
 func NewReloadManager(configPath string, log logger.Logger) *ReloadManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &ReloadManager{
 		configPath:     configPath,
 		logger:         log,
@@ -222,8 +222,8 @@ func (rm *ReloadManager) isConfigFileEvent(eventPath string) bool {
 
 	// Check for temporary files that editors create
 	return strings.HasPrefix(eventFileName, configFileName) ||
-		   strings.HasSuffix(eventFileName, ".tmp") &&
-		   strings.Contains(eventFileName, configFileName)
+		strings.HasSuffix(eventFileName, ".tmp") &&
+			strings.Contains(eventFileName, configFileName)
 }
 
 func (rm *ReloadManager) mapFsnotifyEvent(op fsnotify.Op) ReloadEventType {
