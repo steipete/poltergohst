@@ -74,6 +74,7 @@ func initializeRootCommand() {
 	rootCmd.AddCommand(newLogsCmd())
 	rootCmd.AddCommand(newValidateCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newPolterCmd())
 }
 
 func initConfig() {
