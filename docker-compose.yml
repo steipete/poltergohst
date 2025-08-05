@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  poltergeist:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: poltergeist:latest
+    container_name: poltergeist
+    volumes:
+      # Mount your project directory
+      - ./:/workspace
+      # Mount docker socket for container builds (optional)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - POLTERGEIST_LOG_LEVEL=info
+      - POLTERGEIST_DOCKER=true
+      # Add any other environment variables
+    working_dir: /workspace
+    command: watch
+    restart: unless-stopped
+    networks:
+      - poltergeist-net
+    # Uncomment for interactive mode
+    # stdin_open: true
+    # tty: true
+
+  # Optional: Watchman service for better file watching
+  watchman:
+    image: icalialabs/watchman:latest
+    container_name: poltergeist-watchman
+    volumes:
+      - ./:/workspace
+    networks:
+      - poltergeist-net
+    restart: unless-stopped
+
+  # Optional: Redis for distributed state (if implementing)
+  redis:
+    image: redis:alpine
+    container_name: poltergeist-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - poltergeist-net
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Optional: PostgreSQL for persistent state (if implementing)
+  postgres:
+    image: postgres:15-alpine
+    container_name: poltergeist-db
+    environment:
+      POSTGRES_DB: poltergeist
+      POSTGRES_USER: poltergeist
+      POSTGRES_PASSWORD: poltergeist123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - poltergeist-net
+    restart: unless-stopped
+
+networks:
+  poltergeist-net:
+    driver: bridge
+
+volumes:
+  redis-data:
+  postgres-data:

@@ -1,0 +1,468 @@
+package statistics_test
+
+import (
+	"encoding/json"
+	"math"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/poltergeist/poltergeist/pkg/statistics"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestStatistics_RecordBuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Record successful build
+	stats.RecordBuild("target1", time.Now(), 5*time.Second, true, nil)
+	
+	// Record failed build
+	stats.RecordBuild("target1", time.Now(), 3*time.Second, false, types.BuildError{
+		Message: "compilation failed",
+	})
+	
+	// Get statistics
+	targetStats := stats.GetTargetStats("target1")
+	
+	if targetStats.TotalBuilds != 2 {
+		t.Errorf("expected 2 total builds, got %d", targetStats.TotalBuilds)
+	}
+	
+	if targetStats.SuccessfulBuilds != 1 {
+		t.Errorf("expected 1 successful build, got %d", targetStats.SuccessfulBuilds)
+	}
+	
+	if targetStats.FailedBuilds != 1 {
+		t.Errorf("expected 1 failed build, got %d", targetStats.FailedBuilds)
+	}
+	
+	// Success rate should be 50%
+	if targetStats.SuccessRate != 0.5 {
+		t.Errorf("expected 50%% success rate, got %f", targetStats.SuccessRate)
+	}
+	
+	// Average build time should be 4 seconds
+	if targetStats.AverageBuildTime != 4*time.Second {
+		t.Errorf("expected 4s average build time, got %v", targetStats.AverageBuildTime)
+	}
+}
+
+func TestStatistics_BuildTimes(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Record builds with different times
+	times := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		3 * time.Second,
+		4 * time.Second,
+		5 * time.Second,
+		10 * time.Second, // Outlier
+	}
+	
+	for _, duration := range times {
+		stats.RecordBuild("target1", time.Now(), duration, true, nil)
+	}
+	
+	targetStats := stats.GetTargetStats("target1")
+	
+	// Check min/max/average
+	if targetStats.MinBuildTime != 1*time.Second {
+		t.Errorf("expected 1s min build time, got %v", targetStats.MinBuildTime)
+	}
+	
+	if targetStats.MaxBuildTime != 10*time.Second {
+		t.Errorf("expected 10s max build time, got %v", targetStats.MaxBuildTime)
+	}
+	
+	// Average should be sum/count = 25/6 ≈ 4.17s
+	expectedAvg := time.Duration(25*time.Second.Nanoseconds() / 6)
+	if math.Abs(float64(targetStats.AverageBuildTime-expectedAvg)) > float64(100*time.Millisecond) {
+		t.Errorf("expected ~%v average build time, got %v", expectedAvg, targetStats.AverageBuildTime)
+	}
+	
+	// P50 (median) should be between 3s and 4s
+	if targetStats.P50BuildTime < 3*time.Second || targetStats.P50BuildTime > 4*time.Second {
+		t.Errorf("expected P50 between 3s and 4s, got %v", targetStats.P50BuildTime)
+	}
+	
+	// P95 should be close to 10s (the outlier)
+	if targetStats.P95BuildTime < 9*time.Second {
+		t.Errorf("expected P95 close to 10s, got %v", targetStats.P95BuildTime)
+	}
+}
+
+func TestStatistics_ErrorTracking(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Record different types of errors
+	errors := []types.BuildError{
+		{Message: "syntax error at line 10", Type: "compile"},
+		{Message: "syntax error at line 20", Type: "compile"},
+		{Message: "undefined reference to main", Type: "link"},
+		{Message: "test failed: TestFoo", Type: "test"},
+		{Message: "test failed: TestBar", Type: "test"},
+		{Message: "test failed: TestBaz", Type: "test"},
+	}
+	
+	for _, err := range errors {
+		stats.RecordBuild("target1", time.Now(), 1*time.Second, false, err)
+	}
+	
+	targetStats := stats.GetTargetStats("target1")
+	
+	// Check error categorization
+	if targetStats.ErrorsByType["compile"] != 2 {
+		t.Errorf("expected 2 compile errors, got %d", targetStats.ErrorsByType["compile"])
+	}
+	
+	if targetStats.ErrorsByType["link"] != 1 {
+		t.Errorf("expected 1 link error, got %d", targetStats.ErrorsByType["link"])
+	}
+	
+	if targetStats.ErrorsByType["test"] != 3 {
+		t.Errorf("expected 3 test errors, got %d", targetStats.ErrorsByType["test"])
+	}
+	
+	// Most common error type should be "test"
+	if targetStats.MostCommonErrorType != "test" {
+		t.Errorf("expected 'test' as most common error type, got %s", targetStats.MostCommonErrorType)
+	}
+}
+
+func TestStatistics_TrendAnalysis(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Simulate builds over time with improving success rate
+	baseTime := time.Now().Add(-24 * time.Hour)
+	
+	// First 10 builds: 30% success rate
+	for i := 0; i < 10; i++ {
+		success := i%3 == 0
+		stats.RecordBuild("target1", baseTime.Add(time.Duration(i)*time.Hour), 
+			2*time.Second, success, nil)
+	}
+	
+	// Next 10 builds: 70% success rate
+	for i := 10; i < 20; i++ {
+		success := i%10 < 7
+		stats.RecordBuild("target1", baseTime.Add(time.Duration(i)*time.Hour), 
+			2*time.Second, success, nil)
+	}
+	
+	targetStats := stats.GetTargetStats("target1")
+	trends := targetStats.GetTrends()
+	
+	// Success rate should be improving
+	if trends.SuccessRateTrend != "improving" {
+		t.Errorf("expected improving success rate trend, got %s", trends.SuccessRateTrend)
+	}
+	
+	// Build time should be stable
+	if trends.BuildTimeTrend != "stable" {
+		t.Errorf("expected stable build time trend, got %s", trends.BuildTimeTrend)
+	}
+}
+
+func TestStatistics_Persistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	statsFile := filepath.Join(tmpDir, "build-stats.json")
+	
+	// Create and populate stats
+	stats1 := statistics.NewCollector(tmpDir)
+	stats1.RecordBuild("target1", time.Now(), 5*time.Second, true, nil)
+	stats1.RecordBuild("target2", time.Now(), 3*time.Second, false, nil)
+	
+	// Save to disk
+	err := stats1.Save()
+	if err != nil {
+		t.Fatalf("failed to save stats: %v", err)
+	}
+	
+	// Verify file exists
+	if _, err := os.Stat(statsFile); os.IsNotExist(err) {
+		t.Fatal("stats file not created")
+	}
+	
+	// Load stats in new collector
+	stats2 := statistics.NewCollector(tmpDir)
+	err = stats2.Load()
+	if err != nil {
+		t.Fatalf("failed to load stats: %v", err)
+	}
+	
+	// Verify data was loaded
+	target1Stats := stats2.GetTargetStats("target1")
+	if target1Stats.TotalBuilds != 1 {
+		t.Errorf("expected 1 build for target1, got %d", target1Stats.TotalBuilds)
+	}
+	
+	target2Stats := stats2.GetTargetStats("target2")
+	if target2Stats.TotalBuilds != 1 {
+		t.Errorf("expected 1 build for target2, got %d", target2Stats.TotalBuilds)
+	}
+}
+
+func TestStatistics_GlobalStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Record builds for multiple targets
+	stats.RecordBuild("target1", time.Now(), 5*time.Second, true, nil)
+	stats.RecordBuild("target1", time.Now(), 4*time.Second, true, nil)
+	stats.RecordBuild("target2", time.Now(), 3*time.Second, false, nil)
+	stats.RecordBuild("target3", time.Now(), 6*time.Second, true, nil)
+	
+	globalStats := stats.GetGlobalStats()
+	
+	// Total builds across all targets
+	if globalStats.TotalBuilds != 4 {
+		t.Errorf("expected 4 total builds, got %d", globalStats.TotalBuilds)
+	}
+	
+	// Overall success rate: 3/4 = 75%
+	if globalStats.OverallSuccessRate != 0.75 {
+		t.Errorf("expected 75%% overall success rate, got %f", globalStats.OverallSuccessRate)
+	}
+	
+	// Most active target should be target1
+	if globalStats.MostActiveTarget != "target1" {
+		t.Errorf("expected target1 as most active, got %s", globalStats.MostActiveTarget)
+	}
+	
+	// Total build time: 5+4+3+6 = 18s
+	if globalStats.TotalBuildTime != 18*time.Second {
+		t.Errorf("expected 18s total build time, got %v", globalStats.TotalBuildTime)
+	}
+}
+
+func TestStatistics_TimeWindows(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	now := time.Now()
+	
+	// Record builds at different times
+	stats.RecordBuild("target1", now.Add(-72*time.Hour), 5*time.Second, true, nil) // 3 days ago
+	stats.RecordBuild("target1", now.Add(-48*time.Hour), 4*time.Second, false, nil) // 2 days ago
+	stats.RecordBuild("target1", now.Add(-12*time.Hour), 3*time.Second, true, nil)  // 12 hours ago
+	stats.RecordBuild("target1", now.Add(-1*time.Hour), 2*time.Second, true, nil)   // 1 hour ago
+	
+	// Get stats for different time windows
+	last24h := stats.GetTargetStatsForWindow("target1", 24*time.Hour)
+	last7d := stats.GetTargetStatsForWindow("target1", 7*24*time.Hour)
+	
+	// Last 24h should have 2 builds
+	if last24h.TotalBuilds != 2 {
+		t.Errorf("expected 2 builds in last 24h, got %d", last24h.TotalBuilds)
+	}
+	
+	// Last 7 days should have all 4 builds
+	if last7d.TotalBuilds != 4 {
+		t.Errorf("expected 4 builds in last 7 days, got %d", last7d.TotalBuilds)
+	}
+	
+	// Success rate in last 24h should be 100%
+	if last24h.SuccessRate != 1.0 {
+		t.Errorf("expected 100%% success rate in last 24h, got %f", last24h.SuccessRate)
+	}
+}
+
+func TestStatistics_ConcurrentBuilds(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	baseTime := time.Now()
+	
+	// Record overlapping builds
+	stats.RecordBuildStart("target1", baseTime)
+	stats.RecordBuildStart("target2", baseTime.Add(1*time.Second))
+	stats.RecordBuildStart("target3", baseTime.Add(2*time.Second))
+	
+	// Complete in different order
+	stats.RecordBuildEnd("target2", baseTime.Add(4*time.Second), true, nil)
+	stats.RecordBuildEnd("target1", baseTime.Add(5*time.Second), true, nil)
+	stats.RecordBuildEnd("target3", baseTime.Add(6*time.Second), false, nil)
+	
+	// Check concurrent build tracking
+	concurrentStats := stats.GetConcurrentBuildStats()
+	
+	// Max concurrent builds should be 3
+	if concurrentStats.MaxConcurrent != 3 {
+		t.Errorf("expected max 3 concurrent builds, got %d", concurrentStats.MaxConcurrent)
+	}
+	
+	// Average concurrent builds over the period
+	if concurrentStats.AverageConcurrent < 1 {
+		t.Error("expected average concurrent builds > 1")
+	}
+}
+
+func TestStatistics_BuildQueue(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Record queue metrics
+	stats.RecordQueueLength(5)
+	stats.RecordQueueLength(3)
+	stats.RecordQueueLength(7)
+	stats.RecordQueueLength(2)
+	stats.RecordQueueLength(0)
+	
+	queueStats := stats.GetQueueStats()
+	
+	// Average queue length: (5+3+7+2+0)/5 = 3.4
+	if queueStats.AverageLength != 3.4 {
+		t.Errorf("expected 3.4 average queue length, got %f", queueStats.AverageLength)
+	}
+	
+	// Max queue length
+	if queueStats.MaxLength != 7 {
+		t.Errorf("expected max queue length 7, got %d", queueStats.MaxLength)
+	}
+	
+	// Record wait times
+	stats.RecordQueueWaitTime("target1", 500*time.Millisecond)
+	stats.RecordQueueWaitTime("target2", 1*time.Second)
+	stats.RecordQueueWaitTime("target1", 750*time.Millisecond)
+	
+	// Average wait time for target1: (500+750)/2 = 625ms
+	target1Wait := stats.GetAverageQueueWaitTime("target1")
+	if target1Wait != 625*time.Millisecond {
+		t.Errorf("expected 625ms average wait time, got %v", target1Wait)
+	}
+}
+
+func TestStatistics_Export(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Populate with data
+	stats.RecordBuild("target1", time.Now(), 5*time.Second, true, nil)
+	stats.RecordBuild("target2", time.Now(), 3*time.Second, false, types.BuildError{
+		Message: "test error",
+		Type:    "test",
+	})
+	
+	// Export to JSON
+	jsonPath := filepath.Join(tmpDir, "export.json")
+	err := stats.ExportJSON(jsonPath)
+	if err != nil {
+		t.Fatalf("failed to export JSON: %v", err)
+	}
+	
+	// Verify JSON file
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("failed to read JSON export: %v", err)
+	}
+	
+	var exported map[string]interface{}
+	err = json.Unmarshal(data, &exported)
+	if err != nil {
+		t.Fatalf("invalid JSON export: %v", err)
+	}
+	
+	// Export to CSV
+	csvPath := filepath.Join(tmpDir, "export.csv")
+	err = stats.ExportCSV(csvPath)
+	if err != nil {
+		t.Fatalf("failed to export CSV: %v", err)
+	}
+	
+	// Verify CSV file exists
+	if _, err := os.Stat(csvPath); os.IsNotExist(err) {
+		t.Fatal("CSV export file not created")
+	}
+	
+	// Export to HTML report
+	htmlPath := filepath.Join(tmpDir, "report.html")
+	err = stats.GenerateHTMLReport(htmlPath)
+	if err != nil {
+		t.Fatalf("failed to generate HTML report: %v", err)
+	}
+	
+	// Verify HTML contains expected elements
+	htmlData, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("failed to read HTML report: %v", err)
+	}
+	
+	htmlContent := string(htmlData)
+	expectedElements := []string{
+		"<title>Build Statistics Report</title>",
+		"target1",
+		"target2",
+		"Success Rate",
+		"Build Time",
+	}
+	
+	for _, element := range expectedElements {
+		if !contains(htmlContent, element) {
+			t.Errorf("HTML report missing expected element: %s", element)
+		}
+	}
+}
+
+func TestStatistics_Cleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Add old builds (older than retention period)
+	oldTime := time.Now().Add(-31 * 24 * time.Hour) // 31 days ago
+	recentTime := time.Now().Add(-1 * time.Hour)     // 1 hour ago
+	
+	stats.RecordBuild("target1", oldTime, 5*time.Second, true, nil)
+	stats.RecordBuild("target1", oldTime.Add(1*time.Hour), 4*time.Second, true, nil)
+	stats.RecordBuild("target1", recentTime, 3*time.Second, true, nil)
+	
+	// Clean up old data (30 day retention)
+	stats.CleanupOldData(30 * 24 * time.Hour)
+	
+	targetStats := stats.GetTargetStats("target1")
+	
+	// Should only have 1 recent build remaining
+	if targetStats.TotalBuilds != 1 {
+		t.Errorf("expected 1 build after cleanup, got %d", targetStats.TotalBuilds)
+	}
+}
+
+func TestStatistics_Comparison(t *testing.T) {
+	tmpDir := t.TempDir()
+	stats := statistics.NewCollector(tmpDir)
+	
+	// Record builds for two targets
+	stats.RecordBuild("fast-target", time.Now(), 1*time.Second, true, nil)
+	stats.RecordBuild("fast-target", time.Now(), 2*time.Second, true, nil)
+	
+	stats.RecordBuild("slow-target", time.Now(), 10*time.Second, true, nil)
+	stats.RecordBuild("slow-target", time.Now(), 15*time.Second, false, nil)
+	
+	// Compare targets
+	comparison := stats.CompareTargets("fast-target", "slow-target")
+	
+	// Fast target should have better metrics
+	if comparison.Target1AvgTime >= comparison.Target2AvgTime {
+		t.Error("fast-target should have lower average build time")
+	}
+	
+	if comparison.Target1SuccessRate <= comparison.Target2SuccessRate {
+		t.Error("fast-target should have higher success rate")
+	}
+	
+	// Speed improvement ratio
+	speedRatio := comparison.SpeedImprovement
+	if speedRatio < 5 { // slow-target is at least 5x slower
+		t.Errorf("expected speed improvement > 5x, got %fx", speedRatio)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && s[:len(substr)] == substr || len(s) > len(substr) && contains(s[1:], substr)
+}

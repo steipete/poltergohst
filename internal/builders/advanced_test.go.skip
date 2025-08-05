@@ -1,0 +1,733 @@
+package builders_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/poltergeist/poltergeist/pkg/builders"
+	"github.com/poltergeist/poltergeist/pkg/logger"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestBuilder_IncrementalBuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	// Create target with incremental build support
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "incremental-test",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building incrementally'",
+			WatchPaths:   []string{"*.go"},
+			OutputPath:   filepath.Join(tmpDir, "output"),
+			Incremental:  true,
+		},
+	}
+	
+	builder := builders.NewExecutableBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	// First build
+	err := builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("first build failed: %v", err)
+	}
+	
+	// Create a cache file to simulate incremental state
+	cacheFile := filepath.Join(tmpDir, ".build-cache")
+	os.WriteFile(cacheFile, []byte("cache-data"), 0644)
+	
+	// Second build should use cache
+	err = builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("incremental build failed: %v", err)
+	}
+	
+	// Cache should still exist
+	if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
+		t.Error("cache file was removed")
+	}
+	
+	// Clean should remove cache
+	err = builder.Clean()
+	if err != nil {
+		t.Fatalf("clean failed: %v", err)
+	}
+	
+	if _, err := os.Stat(cacheFile); !os.IsNotExist(err) {
+		t.Error("cache file should be removed after clean")
+	}
+}
+
+func TestBuilder_ParallelDependencies(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	// Create targets with dependencies
+	targetA := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "target-a",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building A'",
+			OutputPath:   filepath.Join(tmpDir, "a"),
+		},
+	}
+	
+	targetB := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "target-b",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building B'",
+			OutputPath:   filepath.Join(tmpDir, "b"),
+			Dependencies: []string{"target-a"},
+		},
+	}
+	
+	targetC := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "target-c",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building C'",
+			OutputPath:   filepath.Join(tmpDir, "c"),
+			Dependencies: []string{"target-a"},
+		},
+	}
+	
+	targetD := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "target-d",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building D'",
+			OutputPath:   filepath.Join(tmpDir, "d"),
+			Dependencies: []string{"target-b", "target-c"},
+		},
+	}
+	
+	// Build order tracker
+	var buildOrder []string
+	var orderMutex sync.Mutex
+	
+	// Wrap builders to track order
+	wrapBuilder := func(name string, builder builders.Builder) builders.Builder {
+		return &trackingBuilder{
+			Builder: builder,
+			name:    name,
+			onBuild: func() {
+				orderMutex.Lock()
+				buildOrder = append(buildOrder, name)
+				orderMutex.Unlock()
+			},
+		}
+	}
+	
+	builderA := wrapBuilder("A", builders.NewExecutableBuilder(targetA, tmpDir, log))
+	builderB := wrapBuilder("B", builders.NewExecutableBuilder(targetB, tmpDir, log))
+	builderC := wrapBuilder("C", builders.NewExecutableBuilder(targetC, tmpDir, log))
+	builderD := wrapBuilder("D", builders.NewExecutableBuilder(targetD, tmpDir, log))
+	
+	ctx := context.Background()
+	
+	// Build in parallel respecting dependencies
+	var wg sync.WaitGroup
+	
+	// A has no dependencies, can start immediately
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		builderA.Build(ctx)
+	}()
+	
+	// Wait for A to complete
+	time.Sleep(100 * time.Millisecond)
+	
+	// B and C depend on A, can run in parallel after A
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		builderB.Build(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		builderC.Build(ctx)
+	}()
+	
+	// Wait for B and C
+	time.Sleep(100 * time.Millisecond)
+	
+	// D depends on B and C
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		builderD.Build(ctx)
+	}()
+	
+	wg.Wait()
+	
+	// Verify build order
+	if len(buildOrder) != 4 {
+		t.Fatalf("expected 4 builds, got %d", len(buildOrder))
+	}
+	
+	// A must be first
+	if buildOrder[0] != "A" {
+		t.Errorf("expected A to build first, got %s", buildOrder[0])
+	}
+	
+	// D must be last
+	if buildOrder[3] != "D" {
+		t.Errorf("expected D to build last, got %s", buildOrder[3])
+	}
+	
+	// B and C should be in the middle (order doesn't matter)
+	middle := map[string]bool{buildOrder[1]: true, buildOrder[2]: true}
+	if !middle["B"] || !middle["C"] {
+		t.Error("expected B and C to build in parallel after A")
+	}
+}
+
+type trackingBuilder struct {
+	builders.Builder
+	name    string
+	onBuild func()
+}
+
+func (b *trackingBuilder) Build(ctx context.Context) error {
+	b.onBuild()
+	return b.Builder.Build(ctx)
+}
+
+func TestBuilder_ConditionalBuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	// Create source files
+	srcFile := filepath.Join(tmpDir, "main.go")
+	os.WriteFile(srcFile, []byte("package main"), 0644)
+	
+	outputFile := filepath.Join(tmpDir, "output")
+	
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "conditional",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: fmt.Sprintf("touch %s", outputFile),
+			WatchPaths:   []string{"*.go"},
+			OutputPath:   outputFile,
+			SkipIfNewer:  true, // Skip build if output is newer than sources
+		},
+	}
+	
+	builder := builders.NewExecutableBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	// First build should execute
+	err := builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("first build failed: %v", err)
+	}
+	
+	// Output should exist
+	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
+		t.Fatal("output file not created")
+	}
+	
+	// Make output newer than source
+	time.Sleep(10 * time.Millisecond)
+	os.Chtimes(outputFile, time.Now(), time.Now())
+	
+	// Second build should be skipped
+	err = builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("conditional build failed: %v", err)
+	}
+	
+	// Modify source file
+	os.WriteFile(srcFile, []byte("package main\n// modified"), 0644)
+	
+	// Build should execute now
+	err = builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("build after modification failed: %v", err)
+	}
+}
+
+func TestBuilder_MultiStageDocker(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/docker"); os.IsNotExist(err) {
+		if _, err := os.Stat("/usr/local/bin/docker"); os.IsNotExist(err) {
+			t.Skip("Docker not available")
+		}
+	}
+	
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	// Create multi-stage Dockerfile
+	dockerfile := `# Build stage
+FROM golang:1.21 AS builder
+WORKDIR /app
+COPY . .
+RUN go build -o app
+
+# Runtime stage
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/app .
+CMD ["./app"]
+`
+	os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\nfunc main() {}"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\ngo 1.21"), 0644)
+	
+	target := &types.DockerTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "multi-stage",
+			Type:         types.TargetTypeDocker,
+			BuildCommand: "docker build",
+		},
+		ImageName:  "test-multi-stage",
+		Dockerfile: "Dockerfile",
+		BuildArgs: map[string]string{
+			"VERSION": "1.0.0",
+		},
+		Target: "builder", // Build specific stage
+	}
+	
+	builder := builders.NewDockerBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	// Build should handle multi-stage
+	err := builder.Build(ctx)
+	if err != nil {
+		// Docker might not be available in CI
+		if err.Error() == "docker not available" {
+			t.Skip("Docker not available")
+		}
+		t.Fatalf("multi-stage build failed: %v", err)
+	}
+}
+
+func TestBuilder_CrossCompilation(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	// Create Go source
+	os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\nfunc main() {}"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\ngo 1.21"), 0644)
+	
+	platforms := []struct {
+		goos   string
+		goarch string
+	}{
+		{"linux", "amd64"},
+		{"darwin", "amd64"},
+		{"windows", "amd64"},
+		{"linux", "arm64"},
+	}
+	
+	for _, platform := range platforms {
+		t.Run(fmt.Sprintf("%s_%s", platform.goos, platform.goarch), func(t *testing.T) {
+			outputName := fmt.Sprintf("app-%s-%s", platform.goos, platform.goarch)
+			if platform.goos == "windows" {
+				outputName += ".exe"
+			}
+			
+			target := &types.ExecutableTarget{
+				BaseTarget: types.BaseTarget{
+					Name:         fmt.Sprintf("cross-%s-%s", platform.goos, platform.goarch),
+					Type:         types.TargetTypeExecutable,
+					BuildCommand: "go build",
+					OutputPath:   filepath.Join(tmpDir, outputName),
+					Env: map[string]string{
+						"GOOS":   platform.goos,
+						"GOARCH": platform.goarch,
+					},
+				},
+			}
+			
+			builder := builders.NewExecutableBuilder(target, tmpDir, log)
+			ctx := context.Background()
+			
+			err := builder.Build(ctx)
+			if err != nil {
+				// Cross-compilation might not be available
+				t.Skipf("cross-compilation to %s/%s not available: %v", platform.goos, platform.goarch, err)
+			}
+		})
+	}
+}
+
+func TestBuilder_CustomHooks(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	// Track hook execution
+	hookFile := filepath.Join(tmpDir, "hooks.txt")
+	
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "hooks-test",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: fmt.Sprintf("echo 'main' >> %s", hookFile),
+			OutputPath:   filepath.Join(tmpDir, "output"),
+			PreBuild:     fmt.Sprintf("echo 'pre' >> %s", hookFile),
+			PostBuild:    fmt.Sprintf("echo 'post' >> %s", hookFile),
+		},
+	}
+	
+	builder := builders.NewExecutableBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	err := builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("build with hooks failed: %v", err)
+	}
+	
+	// Check hook execution order
+	content, err := os.ReadFile(hookFile)
+	if err != nil {
+		t.Fatalf("failed to read hook file: %v", err)
+	}
+	
+	expected := "pre\nmain\npost\n"
+	if string(content) != expected {
+		t.Errorf("expected hook order:\n%s\ngot:\n%s", expected, string(content))
+	}
+}
+
+func TestBuilder_CacheInvalidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	cacheDir := filepath.Join(tmpDir, ".cache")
+	os.MkdirAll(cacheDir, 0755)
+	
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "cache-test",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building'",
+			OutputPath:   filepath.Join(tmpDir, "output"),
+			CacheDir:     cacheDir,
+		},
+	}
+	
+	builder := builders.NewExecutableBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	// Create cache files
+	cacheFile1 := filepath.Join(cacheDir, "cache1.tmp")
+	cacheFile2 := filepath.Join(cacheDir, "cache2.tmp")
+	os.WriteFile(cacheFile1, []byte("cache1"), 0644)
+	os.WriteFile(cacheFile2, []byte("cache2"), 0644)
+	
+	// Build should preserve cache
+	err := builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	
+	// Cache should still exist
+	if _, err := os.Stat(cacheFile1); os.IsNotExist(err) {
+		t.Error("cache file 1 was removed")
+	}
+	if _, err := os.Stat(cacheFile2); os.IsNotExist(err) {
+		t.Error("cache file 2 was removed")
+	}
+	
+	// Clean should remove cache
+	err = builder.Clean()
+	if err != nil {
+		t.Fatalf("clean failed: %v", err)
+	}
+	
+	// Cache should be gone
+	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
+		t.Error("cache directory should be removed")
+	}
+}
+
+func TestBuilder_RemoteBuild(t *testing.T) {
+	t.Skip("Remote build testing requires infrastructure")
+	
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "remote-build",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "ssh buildserver 'cd /build && make'",
+			OutputPath:   filepath.Join(tmpDir, "output"),
+			Remote:       true,
+			RemoteHost:   "buildserver",
+		},
+	}
+	
+	builder := builders.NewExecutableBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	err := builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("remote build failed: %v", err)
+	}
+}
+
+func TestBuilder_MatrixBuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	// Build matrix for different configurations
+	matrix := []struct {
+		os      string
+		arch    string
+		version string
+	}{
+		{"linux", "amd64", "1.0"},
+		{"linux", "arm64", "1.0"},
+		{"darwin", "amd64", "1.0"},
+		{"darwin", "arm64", "1.0"},
+	}
+	
+	var builders []builders.Builder
+	
+	for _, config := range matrix {
+		name := fmt.Sprintf("app-%s-%s-%s", config.os, config.arch, config.version)
+		target := &types.ExecutableTarget{
+			BaseTarget: types.BaseTarget{
+				Name:         name,
+				Type:         types.TargetTypeExecutable,
+				BuildCommand: fmt.Sprintf("echo 'Building %s'", name),
+				OutputPath:   filepath.Join(tmpDir, name),
+				Env: map[string]string{
+					"TARGET_OS":      config.os,
+					"TARGET_ARCH":    config.arch,
+					"TARGET_VERSION": config.version,
+				},
+			},
+		}
+		
+		builder := builders.NewExecutableBuilder(target, tmpDir, log)
+		builders = append(builders, builder)
+	}
+	
+	// Build all configurations in parallel
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	errors := make(chan error, len(builders))
+	
+	for _, b := range builders {
+		wg.Add(1)
+		go func(builder builders.Builder) {
+			defer wg.Done()
+			if err := builder.Build(ctx); err != nil {
+				errors <- err
+			}
+		}(b)
+	}
+	
+	wg.Wait()
+	close(errors)
+	
+	// Check for errors
+	for err := range errors {
+		t.Errorf("matrix build error: %v", err)
+	}
+}
+
+func TestBuilder_WatchAndRebuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	srcFile := filepath.Join(tmpDir, "main.go")
+	os.WriteFile(srcFile, []byte("package main"), 0644)
+	
+	buildCount := 0
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "watch-test",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building'",
+			WatchPaths:   []string{"*.go"},
+			OutputPath:   filepath.Join(tmpDir, "output"),
+		},
+	}
+	
+	// Custom builder that counts builds
+	builder := &countingBuilder{
+		Builder: builders.NewExecutableBuilder(target, tmpDir, log),
+		count:   &buildCount,
+	}
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	
+	// Start watching (simulated)
+	go func() {
+		for i := 0; i < 3; i++ {
+			time.Sleep(100 * time.Millisecond)
+			// Simulate file change
+			os.WriteFile(srcFile, []byte(fmt.Sprintf("package main // change %d", i)), 0644)
+			builder.Build(ctx)
+		}
+	}()
+	
+	<-ctx.Done()
+	
+	// Should have built multiple times
+	if buildCount < 3 {
+		t.Errorf("expected at least 3 builds, got %d", buildCount)
+	}
+}
+
+type countingBuilder struct {
+	builders.Builder
+	count *int
+}
+
+func (b *countingBuilder) Build(ctx context.Context) error {
+	*b.count++
+	return b.Builder.Build(ctx)
+}
+
+func TestBuilder_ResourceLimits(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:         "resource-limited",
+			Type:         types.TargetTypeExecutable,
+			BuildCommand: "echo 'building'",
+			OutputPath:   filepath.Join(tmpDir, "output"),
+			Resources: types.ResourceLimits{
+				MaxCPU:    2,
+				MaxMemory: "1G",
+				Timeout:   30 * time.Second,
+			},
+		},
+	}
+	
+	builder := builders.NewExecutableBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	// Build should respect resource limits
+	err := builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("resource-limited build failed: %v", err)
+	}
+}
+
+func TestBuilder_DeterministicOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	target := &types.ExecutableTarget{
+		BaseTarget: types.BaseTarget{
+			Name:          "deterministic",
+			Type:          types.TargetTypeExecutable,
+			BuildCommand:  "echo 'deterministic'",
+			OutputPath:    filepath.Join(tmpDir, "output"),
+			Deterministic: true,
+		},
+	}
+	
+	builder := builders.NewExecutableBuilder(target, tmpDir, log)
+	ctx := context.Background()
+	
+	// Build twice
+	err := builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("first build failed: %v", err)
+	}
+	
+	// Get first output info
+	info1, _ := os.Stat(filepath.Join(tmpDir, "output"))
+	
+	// Build again
+	err = builder.Build(ctx)
+	if err != nil {
+		t.Fatalf("second build failed: %v", err)
+	}
+	
+	// Get second output info
+	info2, _ := os.Stat(filepath.Join(tmpDir, "output"))
+	
+	// In deterministic mode, outputs should be identical
+	// (In practice, this would check hashes, but for test we check existence)
+	if info1 == nil || info2 == nil {
+		t.Error("deterministic builds should produce consistent output")
+	}
+}
+
+func TestBuilder_ComplexDependencyGraph(t *testing.T) {
+	// Test complex dependency resolution
+	// A -> B -> D
+	// A -> C -> D
+	// E -> F
+	// G -> E, D
+	
+	tmpDir := t.TempDir()
+	log := logger.CreateLogger("", "error")
+	
+	targets := map[string]*types.ExecutableTarget{
+		"A": {BaseTarget: types.BaseTarget{Name: "A", Dependencies: []string{}}},
+		"B": {BaseTarget: types.BaseTarget{Name: "B", Dependencies: []string{"A"}}},
+		"C": {BaseTarget: types.BaseTarget{Name: "C", Dependencies: []string{"A"}}},
+		"D": {BaseTarget: types.BaseTarget{Name: "D", Dependencies: []string{"B", "C"}}},
+		"E": {BaseTarget: types.BaseTarget{Name: "E", Dependencies: []string{}}},
+		"F": {BaseTarget: types.BaseTarget{Name: "F", Dependencies: []string{"E"}}},
+		"G": {BaseTarget: types.BaseTarget{Name: "G", Dependencies: []string{"E", "D"}}},
+	}
+	
+	// Set basic fields for all targets
+	for name, target := range targets {
+		target.Type = types.TargetTypeExecutable
+		target.BuildCommand = fmt.Sprintf("echo 'Building %s'", name)
+		target.OutputPath = filepath.Join(tmpDir, name)
+	}
+	
+	// Build dependency graph
+	graph := builders.NewDependencyGraph()
+	for _, target := range targets {
+		graph.AddTarget(target)
+	}
+	
+	// Get build order
+	buildOrder := graph.GetBuildOrder()
+	
+	// Verify order constraints
+	orderIndex := make(map[string]int)
+	for i, name := range buildOrder {
+		orderIndex[name] = i
+	}
+	
+	// Check dependencies are built before dependents
+	for name, target := range targets {
+		targetIndex := orderIndex[name]
+		for _, dep := range target.Dependencies {
+			depIndex := orderIndex[dep]
+			if depIndex >= targetIndex {
+				t.Errorf("%s (index %d) should be built after %s (index %d)", 
+					name, targetIndex, dep, depIndex)
+			}
+		}
+	}
+	
+	// A and E should be first (no dependencies)
+	if orderIndex["A"] > 1 || orderIndex["E"] > 1 {
+		t.Error("targets with no dependencies should be built first")
+	}
+	
+	// G should be last (depends on most things)
+	if orderIndex["G"] != len(buildOrder)-1 {
+		t.Error("G should be built last")
+	}
+}

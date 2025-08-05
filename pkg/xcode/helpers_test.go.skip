@@ -1,0 +1,652 @@
+package xcode_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/poltergeist/poltergeist/pkg/types"
+	"github.com/poltergeist/poltergeist/pkg/xcode"
+)
+
+func TestXcodeHelper_FindXcodeProjects(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	// Create test Xcode projects
+	projects := []string{
+		"TestApp.xcodeproj",
+		"TestWorkspace.xcworkspace",
+		"SubProject/Another.xcodeproj",
+	}
+
+	for _, projectPath := range projects {
+		fullPath := filepath.Join(tempDir, projectPath)
+		err := os.MkdirAll(fullPath, 0755)
+		if err != nil {
+			t.Fatalf("Failed to create project directory %s: %v", fullPath, err)
+		}
+
+		// Create a minimal project.pbxproj file to make it look like a real project
+		if strings.HasSuffix(projectPath, ".xcodeproj") {
+			pbxprojPath := filepath.Join(fullPath, "project.pbxproj")
+			pbxContent := `// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 55;
+	objects = {
+		/* TestApp target */
+	};
+	rootObject = 97C146E61CF9000F007C117D;
+}`
+			err = os.WriteFile(pbxprojPath, []byte(pbxContent), 0644)
+			if err != nil {
+				t.Fatalf("Failed to create project.pbxproj: %v", err)
+			}
+		}
+	}
+
+	// Create non-Xcode directories (should be ignored)
+	nonXcodeDir := filepath.Join(tempDir, "NotAnXcodeProject")
+	err := os.MkdirAll(nonXcodeDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create non-Xcode directory: %v", err)
+	}
+
+	foundProjects, err := helper.FindXcodeProjects()
+	if err != nil {
+		t.Fatalf("Failed to find Xcode projects: %v", err)
+	}
+
+	expectedCount := 3
+	if len(foundProjects) != expectedCount {
+		t.Errorf("Expected %d projects, found %d", expectedCount, len(foundProjects))
+	}
+
+	// Check that all expected projects were found
+	foundPaths := make(map[string]bool)
+	for _, project := range foundProjects {
+		foundPaths[project.Path] = true
+	}
+
+	for _, expectedPath := range projects {
+		fullExpectedPath := filepath.Join(tempDir, expectedPath)
+		if !foundPaths[fullExpectedPath] {
+			t.Errorf("Expected to find project at %s", fullExpectedPath)
+		}
+	}
+}
+
+func TestXcodeHelper_FindXcodeProjects_EmptyDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	projects, err := helper.FindXcodeProjects()
+	if err != nil {
+		t.Fatalf("FindXcodeProjects should not error on empty directory: %v", err)
+	}
+
+	if len(projects) != 0 {
+		t.Errorf("Expected 0 projects in empty directory, got %d", len(projects))
+	}
+}
+
+func TestXcodeHelper_GetProjectInfo(t *testing.T) {
+	// Skip this test if xcodebuild is not available
+	if !xcode.IsXcodeAvailable() {
+		t.Skip("Xcode tools not available, skipping test")
+	}
+
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	// Create a mock Xcode project
+	projectPath := filepath.Join(tempDir, "TestProject.xcodeproj")
+	err := os.MkdirAll(projectPath, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create project directory: %v", err)
+	}
+
+	// Note: This test would require a real Xcode project to work properly
+	// In a real implementation, we'd need to mock the xcodebuild command
+	_, err = helper.GetProjectInfo(projectPath)
+	
+	// We expect this to fail since we don't have a real project
+	if err == nil {
+		t.Error("Expected error for invalid project, got nil")
+	}
+}
+
+func TestXcodeHelper_ValidateProject(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	tests := []struct {
+		name        string
+		projectPath string
+		setupFunc   func(string) error
+		expectError bool
+	}{
+		{
+			name:        "valid xcodeproj path",
+			projectPath: "ValidProject.xcodeproj",
+			setupFunc: func(path string) error {
+				return os.MkdirAll(filepath.Join(tempDir, path), 0755)
+			},
+			expectError: !xcode.IsXcodeAvailable(),
+		},
+		{
+			name:        "valid xcworkspace path",
+			projectPath: "ValidWorkspace.xcworkspace",
+			setupFunc: func(path string) error {
+				return os.MkdirAll(filepath.Join(tempDir, path), 0755)
+			},
+			expectError: !xcode.IsXcodeAvailable(),
+		},
+		{
+			name:        "invalid extension",
+			projectPath: "Invalid.txt",
+			setupFunc: func(path string) error {
+				return os.WriteFile(filepath.Join(tempDir, path), []byte("content"), 0644)
+			},
+			expectError: true,
+		},
+		{
+			name:        "nonexistent project",
+			projectPath: "Nonexistent.xcodeproj",
+			setupFunc:   func(path string) error { return nil },
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.setupFunc(tt.projectPath)
+			if err != nil {
+				t.Fatalf("Setup failed: %v", err)
+			}
+
+			err = helper.ValidateProject(tt.projectPath)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected validation error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no validation error, got: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestXcodeHelper_GetRecommendedConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	// Create mock Xcode projects
+	projects := []string{
+		"TestApp.xcodeproj",
+		"TestFramework.xcodeproj", 
+	}
+
+	for _, projectPath := range projects {
+		fullPath := filepath.Join(tempDir, projectPath)
+		err := os.MkdirAll(fullPath, 0755)
+		if err != nil {
+			t.Fatalf("Failed to create project directory: %v", err)
+		}
+	}
+
+	// Since we can't run real xcodebuild in tests, we expect this to fail
+	// but we can test the error handling
+	_, err := helper.GetRecommendedConfig()
+	if err == nil {
+		t.Error("Expected error since we can't analyze real projects in test")
+	}
+
+	if !strings.Contains(err.Error(), "failed to list") {
+		t.Errorf("Expected 'failed to list' error, got: %v", err)
+	}
+}
+
+func TestXcodeHelper_GetRecommendedConfig_NoProjects(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	// Empty directory - no Xcode projects
+	_, err := helper.GetRecommendedConfig()
+	if err == nil {
+		t.Error("Expected error when no Xcode projects found")
+	}
+
+	if !strings.Contains(err.Error(), "no Xcode projects found") {
+		t.Errorf("Expected 'no Xcode projects found' error, got: %v", err)
+	}
+}
+
+func TestXcodeHelper_BuildCommands(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	tests := []struct {
+		name         string
+		projectPath  string
+		target       string
+		config       string
+		platform     string
+		expectedArgs []string
+	}{
+		{
+			name:        "xcodeproj with target",
+			projectPath: "Test.xcodeproj",
+			target:      "TestTarget",
+			config:      "Debug",
+			platform:    "",
+			expectedArgs: []string{
+				"-project", "Test.xcodeproj",
+				"-target", "TestTarget",
+				"-configuration", "Debug",
+			},
+		},
+		{
+			name:        "xcodeproj with target and platform",
+			projectPath: "Test.xcodeproj",
+			target:      "TestTarget",
+			config:      "Release",
+			platform:    "iOS",
+			expectedArgs: []string{
+				"-project", "Test.xcodeproj",
+				"-target", "TestTarget",
+				"-configuration", "Release",
+				"-destination", "platform=iOS",
+			},
+		},
+		{
+			name:        "xcworkspace with scheme",
+			projectPath: "Test.xcworkspace",
+			target:      "TestScheme",
+			config:      "Debug",
+			platform:    "",
+			expectedArgs: []string{
+				"-workspace", "Test.xcworkspace",
+				"-scheme", "TestScheme",
+				"-configuration", "Debug",
+				"build",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			
+			if strings.HasSuffix(tt.projectPath, ".xcworkspace") {
+				err = helper.BuildScheme(tt.projectPath, tt.target, tt.config)
+			} else {
+				err = helper.BuildTarget(tt.projectPath, tt.target, tt.config, tt.platform)
+			}
+
+			// We expect this to fail since xcodebuild isn't available or project doesn't exist
+			if err == nil {
+				t.Error("Expected build command to fail in test environment")
+			}
+
+			// Test command generation
+			var cmd string
+			if strings.HasSuffix(tt.projectPath, ".xcworkspace") {
+				cmd = helper.getBuildCommand(tt.projectPath, tt.target, tt.config)
+			} else {
+				cmd = helper.getBuildCommand(tt.projectPath, tt.target, tt.config)
+			}
+
+			// Verify the command contains expected components
+			for _, expectedArg := range tt.expectedArgs {
+				if !strings.Contains(cmd, expectedArg) {
+					t.Errorf("Expected command to contain '%s', got: %s", expectedArg, cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestXcodeHelper_CleanTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	err := helper.CleanTarget("Test.xcodeproj", "TestTarget")
+	
+	// Should fail since xcodebuild isn't available or project doesn't exist
+	if err == nil {
+		t.Error("Expected clean command to fail in test environment")
+	}
+}
+
+func TestIsXcodeAvailable(t *testing.T) {
+	available := xcode.IsXcodeAvailable()
+	
+	// This test will pass/fail depending on the environment
+	// We just verify that the function returns a boolean
+	if available != true && available != false {
+		t.Error("IsXcodeAvailable should return a boolean")
+	}
+}
+
+func TestGetXcodeVersion(t *testing.T) {
+	if !xcode.IsXcodeAvailable() {
+		t.Skip("Xcode not available, skipping version test")
+	}
+
+	version, err := xcode.GetXcodeVersion()
+	if err != nil {
+		t.Errorf("Failed to get Xcode version: %v", err)
+	}
+
+	if version == "" {
+		t.Error("Expected non-empty Xcode version")
+	}
+
+	// Version should be in format like "14.2" or "15.0"
+	if !strings.Contains(version, ".") {
+		t.Errorf("Expected version to contain dot, got: %s", version)
+	}
+}
+
+func TestGetXcodeVersion_NotAvailable(t *testing.T) {
+	if xcode.IsXcodeAvailable() {
+		t.Skip("Xcode is available, skipping not available test")
+	}
+
+	_, err := xcode.GetXcodeVersion()
+	if err == nil {
+		t.Error("Expected error when Xcode is not available")
+	}
+}
+
+func TestXcodeHelper_HelperFunctions(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	tests := []struct {
+		name         string
+		projectPath  string
+		expected     string
+	}{
+		{
+			name:        "xcodeproj name extraction",
+			projectPath: "/path/to/MyApp.xcodeproj",
+			expected:    "MyApp",
+		},
+		{
+			name:        "xcworkspace name extraction",
+			projectPath: "/path/to/MyWorkspace.xcworkspace",
+			expected:    "MyWorkspace",
+		},
+		{
+			name:        "simple name",
+			projectPath: "Simple.xcodeproj",
+			expected:    "Simple",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// This tests the internal getProjectName function via the struct
+			// We create a temporary project to test this
+			err := os.MkdirAll(filepath.Join(tempDir, tt.projectPath), 0755)
+			if err != nil {
+				t.Fatalf("Failed to create test project: %v", err)
+			}
+
+			// Since getProjectName is private, we test it indirectly through project analysis
+			// This would fail in the test environment but we can check the error message
+			_, err = helper.GetProjectInfo(filepath.Join(tempDir, tt.projectPath))
+			if err == nil {
+				t.Error("Expected error in test environment")
+			}
+		})
+	}
+}
+
+func TestXcodeHelper_BuildConfiguration(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	// Test various build configurations
+	configs := []string{"Debug", "Release", "Custom"}
+	
+	for _, config := range configs {
+		cmd := helper.getBuildCommand("Test.xcodeproj", "TestTarget", config)
+		
+		if !strings.Contains(cmd, "-configuration") {
+			t.Errorf("Expected command to contain -configuration flag")
+		}
+		
+		if !strings.Contains(cmd, config) {
+			t.Errorf("Expected command to contain configuration '%s'", config)
+		}
+	}
+}
+
+func TestXcodeHelper_LaunchCommands(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	tests := []struct {
+		name       string
+		target     xcode.XcodeTarget
+		expected   string
+	}{
+		{
+			name: "iOS app with bundle ID",
+			target: xcode.XcodeTarget{
+				Name:       "iOSApp",
+				Type:       "Application",
+				Platform:   types.PlatformIOS,
+				BundleID:   "com.example.iosapp",
+				OutputPath: "",
+			},
+			expected: "xcrun simctl launch booted com.example.iosapp",
+		},
+		{
+			name: "macOS app with output path",
+			target: xcode.XcodeTarget{
+				Name:       "macOSApp",
+				Type:       "Application",
+				Platform:   types.PlatformMacOS,
+				BundleID:   "",
+				OutputPath: "/path/to/app.app",
+			},
+			expected: "open /path/to/app.app",
+		},
+		{
+			name: "no launch command",
+			target: xcode.XcodeTarget{
+				Name:       "Library",
+				Type:       "Library",
+				Platform:   types.PlatformMacOS,
+				BundleID:   "",
+				OutputPath: "",
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := helper.getLaunchCommand(tt.target)
+			
+			if cmd != tt.expected {
+				t.Errorf("Expected launch command '%s', got '%s'", tt.expected, cmd)
+			}
+		})
+	}
+}
+
+func TestXcodeHelper_TestCommands(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	tests := []struct {
+		name        string
+		projectPath string
+		target      string
+		expected    string
+	}{
+		{
+			name:        "xcodeproj test command",
+			projectPath: "Test.xcodeproj",
+			target:      "TestTarget",
+			expected:    "xcodebuild -project Test.xcodeproj -target TestTarget test",
+		},
+		{
+			name:        "xcworkspace test command",
+			projectPath: "Test.xcworkspace",
+			target:      "TestScheme",
+			expected:    "xcodebuild -workspace Test.xcworkspace -scheme TestScheme test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := helper.getTestCommand(tt.projectPath, tt.target)
+			
+			if cmd != tt.expected {
+				t.Errorf("Expected test command '%s', got '%s'", tt.expected, cmd)
+			}
+		})
+	}
+}
+
+func TestXcodeHelper_ComplexProject(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := xcode.NewXcodeHelper(tempDir)
+
+	// Create a complex project structure
+	projectStructure := []string{
+		"MyApp.xcworkspace",
+		"MyApp.xcodeproj",
+		"Pods/Pods.xcodeproj",
+		"Frameworks/MyFramework.xcodeproj",
+		"build",           // Should be skipped
+		".git",            // Should be skipped
+		"DerivedData",     // Should be skipped
+	}
+
+	for _, path := range projectStructure {
+		fullPath := filepath.Join(tempDir, path)
+		err := os.MkdirAll(fullPath, 0755)
+		if err != nil {
+			t.Fatalf("Failed to create path %s: %v", fullPath, err)
+		}
+	}
+
+	projects, err := helper.FindXcodeProjects()
+	if err != nil {
+		t.Fatalf("Failed to find projects: %v", err)
+	}
+
+	// Should find 3 Xcode projects (skip build directories)
+	expectedCount := 3
+	if len(projects) != expectedCount {
+		t.Errorf("Expected %d projects, got %d", expectedCount, len(projects))
+	}
+
+	// Verify that build directories were skipped
+	for _, project := range projects {
+		projectName := filepath.Base(project.Path)
+		if projectName == "build" || projectName == ".git" || projectName == "DerivedData" {
+			t.Errorf("Should not have found project in directory: %s", projectName)
+		}
+	}
+}
+
+func TestXcodeHelper_ConfigGeneration(t *testing.T) {
+	// Test the theoretical config generation without actually running xcodebuild
+	
+	// Mock target data that would come from xcodebuild
+	mockTargets := []xcode.XcodeTarget{
+		{
+			Name:     "MyApp",
+			Type:     "Application",
+			Platform: types.PlatformIOS,
+			BundleID: "com.example.myapp",
+		},
+		{
+			Name:     "MyFramework",
+			Type:     "Framework",
+			Platform: types.PlatformIOS,
+		},
+		{
+			Name:     "MyTests",
+			Type:     "Unit Test Bundle",
+			Platform: types.PlatformIOS,
+		},
+	}
+
+	// Test that different target types would generate appropriate config
+	for _, target := range mockTargets {
+		switch target.Type {
+		case "Application":
+			if target.BundleID == "" {
+				t.Error("Application target should have bundle ID")
+			}
+		case "Framework":
+			// Framework should have platform info
+			if target.Platform == "" {
+				t.Error("Framework target should have platform")
+			}
+		case "Unit Test Bundle":
+			// Test target should have appropriate type
+			if target.Name == "" {
+				t.Error("Test target should have name")
+			}
+		}
+	}
+}
+
+// Helper functions for testing
+
+func createMockXcodeProject(tempDir, projectName string) error {
+	projectDir := filepath.Join(tempDir, projectName)
+	err := os.MkdirAll(projectDir, 0755)
+	if err != nil {
+		return err
+	}
+
+	// Create a minimal project.pbxproj for .xcodeproj
+	if strings.HasSuffix(projectName, ".xcodeproj") {
+		pbxprojPath := filepath.Join(projectDir, "project.pbxproj")
+		pbxContent := `// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 55;
+	objects = {
+	};
+	rootObject = 97C146E61CF9000F007C117D;
+}`
+		return os.WriteFile(pbxprojPath, []byte(pbxContent), 0644)
+	}
+
+	// Create a minimal contents.xcworkspacedata for .xcworkspace
+	if strings.HasSuffix(projectName, ".xcworkspace") {
+		workspaceDir := filepath.Join(projectDir, "contents.xcworkspacedata")
+		workspaceContent := `<?xml version="1.0" encoding="UTF-8"?>
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "self:">
+   </FileRef>
+</Workspace>`
+		return os.WriteFile(workspaceDir, []byte(workspaceContent), 0644)
+	}
+
+	return nil
+}

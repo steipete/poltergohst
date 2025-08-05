@@ -1,0 +1,428 @@
+{
+  "version": "1.0",
+  "projectType": "mixed",
+  "description": "Example Poltergeist configuration showcasing all features",
+  
+  "targets": [
+    {
+      "name": "backend-api",
+      "type": "executable",
+      "buildCommand": "go build -ldflags=\"-X main.version=$(git describe --tags)\" -o bin/api ./cmd/api",
+      "watchPaths": [
+        "cmd/api/**/*.go",
+        "internal/**/*.go",
+        "pkg/**/*.go",
+        "go.mod",
+        "go.sum"
+      ],
+      "excludePaths": [
+        "**/*_test.go",
+        "**/testdata/**"
+      ],
+      "outputPath": "bin/api",
+      "environment": {
+        "CGO_ENABLED": "0",
+        "GOOS": "linux",
+        "GOARCH": "amd64"
+      },
+      "dependencies": ["shared-lib"],
+      "settlingDelay": 500,
+      "debounceInterval": 200,
+      "maxRetries": 3,
+      "enabled": true
+    },
+    
+    {
+      "name": "frontend-web",
+      "type": "custom",
+      "buildCommand": "npm run build",
+      "watchPaths": [
+        "src/**/*.{js,jsx,ts,tsx}",
+        "public/**/*",
+        "package.json",
+        "tsconfig.json"
+      ],
+      "excludePaths": [
+        "node_modules/**",
+        "dist/**",
+        "coverage/**"
+      ],
+      "config": {
+        "outputDir": "dist",
+        "sourceMaps": true,
+        "minify": true
+      },
+      "environment": {
+        "NODE_ENV": "production",
+        "REACT_APP_API_URL": "http://localhost:8080"
+      },
+      "preBuildScript": "npm install",
+      "postBuildScript": "npm run lint",
+      "enabled": true
+    },
+    
+    {
+      "name": "mobile-app",
+      "type": "app-bundle",
+      "buildCommand": "xcodebuild -scheme MyApp -configuration Release",
+      "watchPaths": [
+        "Sources/**/*.swift",
+        "Resources/**/*",
+        "*.xcodeproj/**/*"
+      ],
+      "bundleIdentifier": "com.example.myapp",
+      "scheme": "MyApp",
+      "configuration": "Release",
+      "platform": "iOS",
+      "dependencies": ["shared-framework"],
+      "enabled": false
+    },
+    
+    {
+      "name": "shared-lib",
+      "type": "library",
+      "buildCommand": "go build -buildmode=c-archive -o lib/shared.a ./pkg/shared",
+      "watchPaths": ["pkg/shared/**/*.go"],
+      "libraryType": "static",
+      "outputPath": "lib/shared.a",
+      "exportHeaders": true,
+      "enabled": true
+    },
+    
+    {
+      "name": "shared-framework",
+      "type": "framework",
+      "buildCommand": "xcodebuild -project Shared.xcodeproj -target SharedFramework",
+      "watchPaths": ["Shared/**/*.swift"],
+      "frameworkName": "SharedFramework",
+      "platform": "iOS",
+      "supportedArchitectures": ["arm64", "x86_64"],
+      "embedBitcode": true,
+      "enabled": false
+    },
+    
+    {
+      "name": "unit-tests",
+      "type": "test",
+      "testCommand": "go test -v -race -cover ./...",
+      "watchPaths": [
+        "**/*.go",
+        "go.mod"
+      ],
+      "coverage": true,
+      "coverageThreshold": 80,
+      "benchmarks": true,
+      "timeout": 300,
+      "parallel": true,
+      "enabled": true
+    },
+    
+    {
+      "name": "integration-tests",
+      "type": "test",
+      "testCommand": "go test -v -tags=integration ./test/...",
+      "watchPaths": [
+        "test/**/*.go",
+        "**/*.go"
+      ],
+      "coverage": false,
+      "timeout": 600,
+      "dependencies": ["backend-api"],
+      "environment": {
+        "TEST_ENV": "integration"
+      },
+      "enabled": true
+    },
+    
+    {
+      "name": "docker-image",
+      "type": "docker",
+      "buildCommand": "docker build -f Dockerfile.prod -t myapp:latest .",
+      "watchPaths": [
+        "Dockerfile.prod",
+        "bin/api",
+        "dist/**/*"
+      ],
+      "imageName": "myapp",
+      "tags": ["latest", "v1.0.0"],
+      "registry": "docker.io/mycompany",
+      "push": false,
+      "buildArgs": {
+        "VERSION": "1.0.0",
+        "BUILD_DATE": "$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")"
+      },
+      "dependencies": ["backend-api", "frontend-web"],
+      "enabled": true
+    },
+    
+    {
+      "name": "native-lib",
+      "type": "cmake-library",
+      "buildCommand": "cmake --build build --config Release",
+      "watchPaths": [
+        "src/**/*.{c,cpp,h,hpp}",
+        "CMakeLists.txt"
+      ],
+      "cmakeTarget": "mylib",
+      "buildDirectory": "build",
+      "configuration": "Release",
+      "cmakeOptions": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DBUILD_SHARED_LIBS=ON"
+      ],
+      "enabled": false
+    },
+    
+    {
+      "name": "documentation",
+      "type": "custom",
+      "buildCommand": "mkdocs build",
+      "watchPaths": [
+        "docs/**/*.md",
+        "mkdocs.yml"
+      ],
+      "config": {
+        "outputDir": "site",
+        "theme": "material",
+        "includeApi": true
+      },
+      "enabled": false
+    }
+  ],
+  
+  "watchman": {
+    "useDefaultExclusions": true,
+    "excludeDirs": [
+      "node_modules",
+      ".git",
+      "vendor",
+      "build",
+      "dist",
+      "target",
+      ".idea",
+      ".vscode",
+      "*.egg-info",
+      "__pycache__"
+    ],
+    "excludeExtensions": [
+      ".log",
+      ".tmp",
+      ".cache",
+      ".pyc",
+      ".pyo",
+      ".swp",
+      ".DS_Store"
+    ],
+    "maxFileEvents": 1000,
+    "recrawlThreshold": 10000,
+    "settlingDelay": 1000,
+    "useWatchmanIfAvailable": true,
+    "fallbackToFSNotify": true
+  },
+  
+  "performance": {
+    "profile": "balanced",
+    "autoOptimize": true,
+    "metrics": {
+      "enabled": true,
+      "reportInterval": 60,
+      "exportPath": "metrics/performance.json"
+    },
+    "caching": {
+      "enabled": true,
+      "directory": ".poltergeist/cache",
+      "maxSize": "500MB",
+      "ttl": 86400
+    },
+    "resourceLimits": {
+      "maxCPU": 80,
+      "maxMemory": "2GB",
+      "maxFileHandles": 1024
+    }
+  },
+  
+  "buildScheduling": {
+    "parallelization": 4,
+    "maxQueueSize": 100,
+    "prioritization": {
+      "enabled": true,
+      "algorithm": "smart",
+      "focusDetectionWindow": 60000,
+      "priorityDecayTime": 300000,
+      "buildTimeoutMultiplier": 2.0,
+      "factors": {
+        "recentChanges": 0.3,
+        "buildTime": 0.2,
+        "successRate": 0.2,
+        "dependencies": 0.2,
+        "userFocus": 0.1
+      }
+    },
+    "retry": {
+      "maxAttempts": 3,
+      "backoffStrategy": "exponential",
+      "initialDelay": 1000,
+      "maxDelay": 30000
+    }
+  },
+  
+  "notifications": {
+    "enabled": true,
+    "channels": {
+      "desktop": {
+        "enabled": true,
+        "successSound": "Glass",
+        "failureSound": "Basso",
+        "showDuration": true,
+        "groupByTarget": true
+      },
+      "slack": {
+        "enabled": false,
+        "webhookUrl": "${SLACK_WEBHOOK_URL}",
+        "channel": "#builds",
+        "username": "Poltergeist",
+        "iconEmoji": ":ghost:",
+        "mentions": {
+          "onFailure": ["@channel"],
+          "onSuccess": []
+        }
+      },
+      "email": {
+        "enabled": false,
+        "smtp": {
+          "host": "smtp.gmail.com",
+          "port": 587,
+          "secure": false,
+          "auth": {
+            "user": "${SMTP_USER}",
+            "pass": "${SMTP_PASS}"
+          }
+        },
+        "from": "poltergeist@example.com",
+        "to": ["dev-team@example.com"],
+        "onlyOnFailure": true
+      }
+    },
+    "filters": {
+      "minDuration": 5000,
+      "excludeTargets": ["documentation"],
+      "quietHours": {
+        "enabled": false,
+        "start": "22:00",
+        "end": "08:00"
+      }
+    }
+  },
+  
+  "logging": {
+    "file": "poltergeist.log",
+    "level": "info",
+    "format": "json",
+    "maxSize": "100MB",
+    "maxBackups": 5,
+    "maxAge": 30,
+    "compress": true,
+    "targets": {
+      "backend-api": "debug",
+      "frontend-web": "warn"
+    }
+  },
+  
+  "daemon": {
+    "enabled": false,
+    "mode": "background",
+    "pidFile": ".poltergeist/daemon.pid",
+    "socketPath": ".poltergeist/daemon.sock",
+    "workers": 4,
+    "autoStart": true,
+    "keepAlive": true,
+    "healthCheck": {
+      "enabled": true,
+      "interval": 30,
+      "timeout": 5
+    }
+  },
+  
+  "distribution": {
+    "enabled": false,
+    "mode": "client",
+    "server": {
+      "host": "build-server.example.com",
+      "port": 8080,
+      "tls": true,
+      "cert": "/path/to/cert.pem",
+      "key": "/path/to/key.pem"
+    },
+    "authentication": {
+      "type": "token",
+      "token": "${BUILD_SERVER_TOKEN}"
+    },
+    "cache": {
+      "type": "redis",
+      "host": "localhost",
+      "port": 6379,
+      "password": "${REDIS_PASSWORD}",
+      "db": 0
+    }
+  },
+  
+  "hooks": {
+    "preBuild": "echo 'Starting build at $(date)'",
+    "postBuild": "echo 'Build completed at $(date)'",
+    "onSuccess": "notify-send 'Build Success' 'All targets built successfully'",
+    "onFailure": "notify-send 'Build Failed' 'Check logs for details'",
+    "onStart": "echo 'Poltergeist started'",
+    "onStop": "echo 'Poltergeist stopped'"
+  },
+  
+  "environment": {
+    "global": {
+      "CI": "false",
+      "ENVIRONMENT": "development"
+    },
+    "profiles": {
+      "development": {
+        "DEBUG": "true",
+        "API_URL": "http://localhost:8080"
+      },
+      "staging": {
+        "DEBUG": "false",
+        "API_URL": "https://staging.example.com"
+      },
+      "production": {
+        "DEBUG": "false",
+        "API_URL": "https://api.example.com"
+      }
+    },
+    "activeProfile": "development"
+  },
+  
+  "plugins": [
+    {
+      "name": "eslint-plugin",
+      "enabled": true,
+      "path": "./plugins/eslint",
+      "config": {
+        "autoFix": true,
+        "configFile": ".eslintrc.json"
+      }
+    },
+    {
+      "name": "security-scanner",
+      "enabled": false,
+      "path": "./plugins/security",
+      "config": {
+        "scanDependencies": true,
+        "scanCode": true
+      }
+    }
+  ],
+  
+  "experimental": {
+    "enableBuildCache": true,
+    "enableIncrementalBuilds": true,
+    "enableDistributedCache": false,
+    "enablePredictiveBuilds": false,
+    "enableAutoScaling": false
+  }
+}

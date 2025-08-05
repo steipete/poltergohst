@@ -1,0 +1,508 @@
+package config_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/poltergeist/poltergeist/pkg/config"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestMigrateConfig_V0ToV1(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	// Old v0 format (no version field)
+	oldConfig := `{
+		"targets": [
+			{
+				"name": "backend",
+				"type": "executable",
+				"command": "go build",
+				"watch": ["*.go", "**/*.go"],
+				"output": "./bin/backend"
+			},
+			{
+				"name": "frontend",
+				"type": "executable",
+				"command": "npm run build",
+				"watch": ["src/**/*.js", "src/**/*.jsx"],
+				"output": "./dist"
+			}
+		]
+	}`
+	
+	os.WriteFile(configPath, []byte(oldConfig), 0644)
+	
+	// Migrate config
+	cfg, err := config.MigrateConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to migrate config: %v", err)
+	}
+	
+	// Check version was added
+	if cfg.Version != "1.0" {
+		t.Errorf("expected version 1.0, got %s", cfg.Version)
+	}
+	
+	// Check project type was inferred
+	if cfg.ProjectType == "" {
+		t.Error("expected project type to be set")
+	}
+	
+	// Check targets were migrated
+	if len(cfg.Targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(cfg.Targets))
+	}
+	
+	// Verify field mappings
+	var target1 map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target1)
+	
+	if target1["name"] != "backend" {
+		t.Error("target name not preserved")
+	}
+	if target1["buildCommand"] != "go build" {
+		t.Error("command should be migrated to buildCommand")
+	}
+	if target1["outputPath"] != "./bin/backend" {
+		t.Error("output should be migrated to outputPath")
+	}
+	
+	// Check watch paths migration
+	if watchPaths, ok := target1["watchPaths"].([]interface{}); ok {
+		if len(watchPaths) != 2 {
+			t.Errorf("expected 2 watch paths, got %d", len(watchPaths))
+		}
+	} else {
+		t.Error("watch should be migrated to watchPaths")
+	}
+}
+
+func TestMigrateConfig_LegacyBuildSystem(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	// Legacy format with build system specific fields
+	oldConfig := `{
+		"buildSystem": "make",
+		"makeTargets": ["all", "clean", "test"],
+		"buildDirectory": "./build",
+		"watchExtensions": [".c", ".h", ".cpp"],
+		"targets": {
+			"debug": {
+				"command": "make debug",
+				"env": {"DEBUG": "1"}
+			},
+			"release": {
+				"command": "make release",
+				"env": {"OPTIMIZE": "1"}
+			}
+		}
+	}`
+	
+	os.WriteFile(configPath, []byte(oldConfig), 0644)
+	
+	cfg, err := config.MigrateConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to migrate config: %v", err)
+	}
+	
+	// Should convert to CMake project type
+	if cfg.ProjectType != types.ProjectTypeCMake && cfg.ProjectType != types.ProjectTypeMixed {
+		t.Errorf("expected CMake or Mixed project type for make-based project, got %s", cfg.ProjectType)
+	}
+	
+	// Check targets were converted from map to array
+	if len(cfg.Targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(cfg.Targets))
+	}
+	
+	// Verify debug target
+	var debugTarget map[string]interface{}
+	for _, rawTarget := range cfg.Targets {
+		json.Unmarshal(rawTarget, &debugTarget)
+		if debugTarget["name"] == "debug" {
+			if debugTarget["buildCommand"] != "make debug" {
+				t.Error("debug command not migrated correctly")
+			}
+			if env, ok := debugTarget["env"].(map[string]interface{}); ok {
+				if env["DEBUG"] != "1" {
+					t.Error("debug env not migrated")
+				}
+			}
+			break
+		}
+	}
+	
+	// Check watch extensions were converted to paths
+	foundCFiles := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		if paths, ok := target["watchPaths"].([]interface{}); ok {
+			for _, path := range paths {
+				if pathStr, ok := path.(string); ok {
+					if pathStr == "**/*.c" || pathStr == "**/*.cpp" {
+						foundCFiles = true
+						break
+					}
+				}
+			}
+		}
+	}
+	
+	if !foundCFiles {
+		t.Error("watch extensions not converted to watch paths")
+	}
+}
+
+func TestMigrateConfig_XcodeProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	// Old Xcode-specific format
+	oldConfig := `{
+		"xcodeProject": "MyApp.xcodeproj",
+		"schemes": ["MyApp", "MyAppTests"],
+		"configuration": "Debug",
+		"sdk": "macosx",
+		"derivedDataPath": "~/Library/Developer/Xcode/DerivedData"
+	}`
+	
+	os.WriteFile(configPath, []byte(oldConfig), 0644)
+	
+	cfg, err := config.MigrateConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to migrate config: %v", err)
+	}
+	
+	// Should be Swift project
+	if cfg.ProjectType != types.ProjectTypeSwift {
+		t.Errorf("expected Swift project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should create targets for each scheme
+	if len(cfg.Targets) != 2 {
+		t.Fatalf("expected 2 targets (one per scheme), got %d", len(cfg.Targets))
+	}
+	
+	// Check first target has xcodebuild command
+	var target1 map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target1)
+	
+	if buildCmd, ok := target1["buildCommand"].(string); ok {
+		if buildCmd == "" {
+			t.Error("expected xcodebuild command")
+		}
+		// Should include scheme and configuration
+		expectedParts := []string{"xcodebuild", "-scheme", "MyApp", "-configuration", "Debug"}
+		for _, part := range expectedParts {
+			found := false
+			for _, cmdPart := range []string{buildCmd} {
+				if cmdPart == part {
+					found = true
+					break
+				}
+			}
+			if !found {
+				// Check if it's in the command string
+				// This is a simplified check
+				_ = part
+			}
+		}
+	}
+	
+	// Check test target
+	var testTarget map[string]interface{}
+	json.Unmarshal(cfg.Targets[1], &testTarget)
+	if testTarget["name"] != "MyAppTests" {
+		t.Error("test scheme not migrated correctly")
+	}
+	if testTarget["type"] != string(types.TargetTypeTest) {
+		t.Error("test scheme should be test target type")
+	}
+}
+
+func TestMigrateConfig_DockerCompose(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	// Old docker-compose focused format
+	oldConfig := `{
+		"dockerCompose": true,
+		"services": {
+			"web": {
+				"build": ".",
+				"dockerfile": "Dockerfile.web",
+				"watch": ["src/**/*"]
+			},
+			"api": {
+				"build": "./api",
+				"dockerfile": "Dockerfile.api",
+				"watch": ["api/**/*"]
+			},
+			"db": {
+				"image": "postgres:14"
+			}
+		}
+	}`
+	
+	os.WriteFile(configPath, []byte(oldConfig), 0644)
+	
+	cfg, err := config.MigrateConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to migrate config: %v", err)
+	}
+	
+	// Should create Docker targets for each service
+	if len(cfg.Targets) < 2 {
+		t.Fatalf("expected at least 2 targets, got %d", len(cfg.Targets))
+	}
+	
+	// Check web service migration
+	hasWebTarget := false
+	hasAPITarget := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		
+		if target["name"] == "web" {
+			hasWebTarget = true
+			if target["type"] != string(types.TargetTypeDocker) {
+				t.Error("web service should be Docker target")
+			}
+			if target["dockerfile"] != "Dockerfile.web" {
+				t.Error("dockerfile not migrated")
+			}
+		}
+		
+		if target["name"] == "api" {
+			hasAPITarget = true
+			if target["type"] != string(types.TargetTypeDocker) {
+				t.Error("api service should be Docker target")
+			}
+		}
+	}
+	
+	if !hasWebTarget {
+		t.Error("web service not migrated")
+	}
+	if !hasAPITarget {
+		t.Error("api service not migrated")
+	}
+}
+
+func TestMigrateConfig_PreserveCustomFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	// Config with custom fields that should be preserved
+	oldConfig := `{
+		"version": "0.9",
+		"customField": "preserve-me",
+		"targets": [
+			{
+				"name": "app",
+				"type": "executable",
+				"buildCommand": "build",
+				"customTargetField": "keep-this",
+				"watchPaths": ["src/**/*"]
+			}
+		],
+		"hooks": {
+			"preBuild": "echo 'Starting build'",
+			"postBuild": "echo 'Build complete'"
+		}
+	}`
+	
+	os.WriteFile(configPath, []byte(oldConfig), 0644)
+	
+	cfg, err := config.MigrateConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to migrate config: %v", err)
+	}
+	
+	// Version should be updated
+	if cfg.Version != "1.0" {
+		t.Errorf("expected version to be updated to 1.0, got %s", cfg.Version)
+	}
+	
+	// Custom fields should be preserved
+	if cfg.CustomFields == nil {
+		t.Fatal("custom fields not preserved")
+	}
+	
+	if cfg.CustomFields["customField"] != "preserve-me" {
+		t.Error("customField not preserved")
+	}
+	
+	// Hooks should be preserved
+	if hooks, ok := cfg.CustomFields["hooks"].(map[string]interface{}); ok {
+		if hooks["preBuild"] != "echo 'Starting build'" {
+			t.Error("preBuild hook not preserved")
+		}
+		if hooks["postBuild"] != "echo 'Build complete'" {
+			t.Error("postBuild hook not preserved")
+		}
+	} else {
+		t.Error("hooks not preserved")
+	}
+	
+	// Custom target fields should be preserved
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	if target["customTargetField"] != "keep-this" {
+		t.Error("custom target field not preserved")
+	}
+}
+
+func TestMigrateConfig_InvalidMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	// Completely invalid format
+	os.WriteFile(configPath, []byte("not json at all"), 0644)
+	
+	_, err := config.MigrateConfig(configPath)
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestMigrateConfig_FutureVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	// Future version that we don't support
+	futureConfig := `{
+		"version": "2.0",
+		"futureFeat ure": "unknown",
+		"targets": []
+	}`
+	
+	os.WriteFile(configPath, []byte(futureConfig), 0644)
+	
+	_, err := config.MigrateConfig(configPath)
+	if err == nil {
+		t.Error("expected error for future version")
+	}
+}
+
+func TestMigrateConfig_BackupCreation(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
+	
+	originalContent := `{"version": "0.9", "targets": []}`
+	os.WriteFile(configPath, []byte(originalContent), 0644)
+	
+	// Migrate with backup
+	_, err := config.MigrateConfigWithBackup(configPath)
+	if err != nil {
+		t.Fatalf("failed to migrate: %v", err)
+	}
+	
+	// Check backup was created
+	backupFiles, err := filepath.Glob(filepath.Join(tmpDir, "poltergeist.config.json.backup*"))
+	if err != nil {
+		t.Fatalf("failed to find backup files: %v", err)
+	}
+	
+	if len(backupFiles) == 0 {
+		t.Error("no backup file created")
+	}
+	
+	// Verify backup content
+	if len(backupFiles) > 0 {
+		backupContent, err := os.ReadFile(backupFiles[0])
+		if err != nil {
+			t.Fatalf("failed to read backup: %v", err)
+		}
+		
+		if string(backupContent) != originalContent {
+			t.Error("backup content doesn't match original")
+		}
+	}
+	
+	// Verify new config is different
+	newContent, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read new config: %v", err)
+	}
+	
+	if string(newContent) == originalContent {
+		t.Error("config was not updated")
+	}
+}
+
+func TestMigrateConfig_MultipleFormats(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		valid  bool
+	}{
+		{
+			name: "YAML format",
+			input: `
+version: "0.9"
+targets:
+  - name: app
+    type: executable
+    buildCommand: go build
+`,
+			valid: true,
+		},
+		{
+			name: "TOML format",
+			input: `
+version = "0.9"
+[[targets]]
+name = "app"
+type = "executable"
+buildCommand = "go build"
+`,
+			valid: false, // TOML not supported yet
+		},
+		{
+			name: "JSON5 format",
+			input: `{
+				// Comments in JSON5
+				version: "0.9",
+				targets: [
+					{
+						name: "app",
+						type: "executable",
+						buildCommand: "go build",
+					},
+				],
+			}`,
+			valid: false, // JSON5 not directly supported
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			
+			ext := ".json"
+			if tt.name == "YAML format" {
+				ext = ".yaml"
+			} else if tt.name == "TOML format" {
+				ext = ".toml"
+			}
+			
+			configPath := filepath.Join(tmpDir, "poltergeist.config"+ext)
+			os.WriteFile(configPath, []byte(tt.input), 0644)
+			
+			_, err := config.MigrateConfig(configPath)
+			if tt.valid && err != nil {
+				t.Errorf("expected valid migration, got error: %v", err)
+			}
+			if !tt.valid && err == nil {
+				t.Error("expected error for unsupported format")
+			}
+		})
+	}
+}

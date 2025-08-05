@@ -1,0 +1,642 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/poltergeist/poltergeist/pkg/logger"
+	"github.com/poltergeist/poltergeist/pkg/state"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestRunWait_SingleTarget_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Create config with a test target
+	createTestConfig(t, tempDir, []map[string]interface{}{
+		{
+			"name":         "test-target",
+			"type":         "executable",
+			"buildCommand": "echo test",
+			"watchPaths":   []string{"*.go"},
+		},
+	})
+
+	// Create state manager and initialize target state
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+	target := &mockTargetForWait{name: "test-target"}
+	
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Set target to succeeded status
+	err = sm.UpdateBuildStatus("test-target", types.BuildStatusSucceeded)
+	if err != nil {
+		t.Fatalf("Failed to update status: %v", err)
+	}
+
+	// Test waiting for succeeded status (should return immediately)
+	err = runWait("test-target", nil, "succeeded", 10, 1)
+	if err != nil {
+		t.Errorf("runWait failed: %v", err)
+	}
+}
+
+func TestRunWait_SingleTarget_Timeout(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Create config
+	createTestConfig(t, tempDir, []map[string]interface{}{
+		{
+			"name":         "test-target",
+			"type":         "executable",
+			"buildCommand": "echo test",
+			"watchPaths":   []string{"*.go"},
+		},
+	})
+
+	// Create state manager and initialize target with building status
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+	target := &mockTargetForWait{name: "test-target"}
+	
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Set target to building status (won't reach succeeded)
+	err = sm.UpdateBuildStatus("test-target", types.BuildStatusBuilding)
+	if err != nil {
+		t.Fatalf("Failed to update status: %v", err)
+	}
+
+	// Test waiting for succeeded status with short timeout
+	err = runWait("test-target", nil, "succeeded", 2, 1)
+	if err == nil {
+		t.Error("Expected error due to timeout, got nil")
+	}
+}
+
+func TestRunWait_MultipleTargets_Mixed(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Create config with multiple targets
+	createTestConfig(t, tempDir, []map[string]interface{}{
+		{
+			"name":         "target1",
+			"type":         "executable",
+			"buildCommand": "echo test1",
+			"watchPaths":   []string{"*.go"},
+		},
+		{
+			"name":         "target2",
+			"type":         "executable",
+			"buildCommand": "echo test2",
+			"watchPaths":   []string{"*.go"},
+		},
+		{
+			"name":         "target3",
+			"type":         "executable",
+			"buildCommand": "echo test3",
+			"watchPaths":   []string{"*.go"},
+		},
+	})
+
+	// Create state manager and initialize targets
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+	
+	targets := []string{"target1", "target2", "target3"}
+	for _, name := range targets {
+		target := &mockTargetForWait{name: name}
+		_, err := sm.InitializeState(target)
+		if err != nil {
+			t.Fatalf("Failed to initialize state for %s: %v", name, err)
+		}
+	}
+
+	// Set different statuses
+	sm.UpdateBuildStatus("target1", types.BuildStatusSucceeded)
+	sm.UpdateBuildStatus("target2", types.BuildStatusSucceeded)
+	sm.UpdateBuildStatus("target3", types.BuildStatusBuilding)
+
+	// Test waiting for succeeded status - should fail because target3 is building
+	err := runWait("", []string{"target1", "target2", "target3"}, "succeeded", 2, 1)
+	if err == nil {
+		t.Error("Expected error because not all targets succeeded")
+	}
+
+	// Set target3 to succeeded
+	sm.UpdateBuildStatus("target3", types.BuildStatusSucceeded)
+
+	// Now should succeed
+	err = runWait("", []string{"target1", "target2", "target3"}, "succeeded", 5, 1)
+	if err != nil {
+		t.Errorf("runWait failed after all targets succeeded: %v", err)
+	}
+}
+
+func TestRunWait_AllTargets(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Create config with targets
+	createTestConfig(t, tempDir, []map[string]interface{}{
+		{
+			"name":         "target1",
+			"type":         "executable",
+			"buildCommand": "echo test1",
+			"watchPaths":   []string{"*.go"},
+		},
+		{
+			"name":         "target2",
+			"type":         "test",
+			"testCommand":  "echo test2",
+			"watchPaths":   []string{"*.go"},
+		},
+	})
+
+	// Create state manager and initialize all targets
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+	
+	for _, name := range []string{"target1", "target2"} {
+		target := &mockTargetForWait{name: name}
+		_, err := sm.InitializeState(target)
+		if err != nil {
+			t.Fatalf("Failed to initialize state for %s: %v", name, err)
+		}
+		
+		// Set all to succeeded
+		err = sm.UpdateBuildStatus(name, types.BuildStatusSucceeded)
+		if err != nil {
+			t.Fatalf("Failed to update status for %s: %v", name, err)
+		}
+	}
+
+	// Test waiting for all targets (no specific targets specified)
+	err := runWait("", nil, "succeeded", 5, 1)
+	if err != nil {
+		t.Errorf("runWait failed for all targets: %v", err)
+	}
+}
+
+func TestRunWait_InvalidStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	createTestConfig(t, tempDir, []map[string]interface{}{
+		{
+			"name":         "test-target",
+			"type":         "executable",
+			"buildCommand": "echo test",
+			"watchPaths":   []string{"*.go"},
+		},
+	})
+
+	// Test with invalid status
+	err := runWait("test-target", nil, "invalid-status", 10, 1)
+	if err == nil {
+		t.Error("Expected error for invalid status")
+	}
+
+	expectedSubstring := "invalid status"
+	if !containsString(err.Error(), expectedSubstring) {
+		t.Errorf("Expected error to contain '%s', got: %v", expectedSubstring, err)
+	}
+}
+
+func TestRunWait_NonexistentTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	createTestConfig(t, tempDir, []map[string]interface{}{
+		{
+			"name":         "existing-target",
+			"type":         "executable",
+			"buildCommand": "echo test",
+			"watchPaths":   []string{"*.go"},
+		},
+	})
+
+	// Test waiting for nonexistent target
+	err := runWait("nonexistent-target", nil, "succeeded", 2, 1)
+	if err == nil {
+		t.Error("Expected error for nonexistent target")
+	}
+}
+
+func TestWaitForTargets_StatusTransition(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	// Initialize target
+	target := &mockTargetForWait{name: "transition-target"}
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Set initial status to building
+	err = sm.UpdateBuildStatus("transition-target", types.BuildStatusBuilding)
+	if err != nil {
+		t.Fatalf("Failed to set initial status: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Start waiting in background
+	resultChan := make(chan []WaitResult, 1)
+	go func() {
+		results, _ := waitForTargets(ctx, sm, []string{"transition-target"}, types.BuildStatusSucceeded, 100*time.Millisecond)
+		resultChan <- results
+	}()
+
+	// Simulate status transition after delay
+	time.Sleep(500 * time.Millisecond)
+	err = sm.UpdateBuildStatus("transition-target", types.BuildStatusSucceeded)
+	if err != nil {
+		t.Fatalf("Failed to update status: %v", err)
+	}
+
+	// Wait for result
+	select {
+	case results := <-resultChan:
+		if len(results) != 1 {
+			t.Fatalf("Expected 1 result, got %d", len(results))
+		}
+		
+		result := results[0]
+		if !result.Success {
+			t.Error("Expected successful result")
+		}
+		
+		if result.Status != types.BuildStatusSucceeded {
+			t.Errorf("Expected status succeeded, got %s", result.Status)
+		}
+		
+		if result.Duration < 400*time.Millisecond {
+			t.Errorf("Expected duration >= 400ms, got %v", result.Duration)
+		}
+
+	case <-time.After(6 * time.Second):
+		t.Fatal("Test timed out")
+	}
+}
+
+func TestWaitForTargets_Timeout(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	// Initialize target
+	target := &mockTargetForWait{name: "timeout-target"}
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Set status to building (won't reach succeeded)
+	err = sm.UpdateBuildStatus("timeout-target", types.BuildStatusBuilding)
+	if err != nil {
+		t.Fatalf("Failed to set status: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	results, err := waitForTargets(ctx, sm, []string{"timeout-target"}, types.BuildStatusSucceeded, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("waitForTargets failed: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+
+	result := results[0]
+	if !result.TimedOut {
+		t.Error("Expected timeout result")
+	}
+
+	if result.Success {
+		t.Error("Should not be successful on timeout")
+	}
+
+	if result.Status != types.BuildStatusBuilding {
+		t.Errorf("Expected status building, got %s", result.Status)
+	}
+}
+
+func TestWaitForSpecificTarget_StatusChange(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	// Initialize target
+	target := &mockTargetForWait{name: "specific-target"}
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Set initial status
+	err = sm.UpdateBuildStatus("specific-target", types.BuildStatusQueued)
+	if err != nil {
+		t.Fatalf("Failed to set initial status: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Start waiting in background
+	resultChan := make(chan *WaitResult, 1)
+	go func() {
+		result, _ := waitForSpecificTarget(ctx, sm, "specific-target", types.BuildStatusSucceeded, 100*time.Millisecond)
+		resultChan <- result
+	}()
+
+	// Simulate status changes
+	time.Sleep(200 * time.Millisecond)
+	sm.UpdateBuildStatus("specific-target", types.BuildStatusBuilding)
+	
+	time.Sleep(300 * time.Millisecond)
+	sm.UpdateBuildStatus("specific-target", types.BuildStatusSucceeded)
+
+	// Wait for result
+	select {
+	case result := <-resultChan:
+		if !result.Success {
+			t.Error("Expected successful result")
+		}
+		
+		if result.Status != types.BuildStatusSucceeded {
+			t.Errorf("Expected status succeeded, got %s", result.Status)
+		}
+
+	case <-time.After(4 * time.Second):
+		t.Fatal("Test timed out")
+	}
+}
+
+func TestWaitForAnyTarget_FirstWins(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	// Initialize targets
+	targets := []string{"target1", "target2", "target3"}
+	for _, name := range targets {
+		target := &mockTargetForWait{name: name}
+		_, err := sm.InitializeState(target)
+		if err != nil {
+			t.Fatalf("Failed to initialize state for %s: %v", name, err)
+		}
+		
+		// Set all to building initially
+		err = sm.UpdateBuildStatus(name, types.BuildStatusBuilding)
+		if err != nil {
+			t.Fatalf("Failed to set status for %s: %v", name, err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Start waiting in background
+	resultChan := make(chan *WaitResult, 1)
+	go func() {
+		result, _ := waitForAnyTarget(ctx, sm, targets, types.BuildStatusSucceeded, 100*time.Millisecond)
+		resultChan <- result
+	}()
+
+	// Make target2 succeed first
+	time.Sleep(200 * time.Millisecond)
+	sm.UpdateBuildStatus("target2", types.BuildStatusSucceeded)
+
+	// Wait for result
+	select {
+	case result := <-resultChan:
+		if !result.Success {
+			t.Error("Expected successful result")
+		}
+		
+		if result.Target != "target2" {
+			t.Errorf("Expected target2 to win, got %s", result.Target)
+		}
+		
+		if result.Status != types.BuildStatusSucceeded {
+			t.Errorf("Expected status succeeded, got %s", result.Status)
+		}
+
+	case <-time.After(4 * time.Second):
+		t.Fatal("Test timed out")
+	}
+}
+
+func TestDisplayWaitResults_AllSuccess(t *testing.T) {
+	results := []WaitResult{
+		{
+			Target:   "target1",
+			Status:   types.BuildStatusSucceeded,
+			Duration: 2 * time.Second,
+			Success:  true,
+		},
+		{
+			Target:   "target2",
+			Status:   types.BuildStatusSucceeded,
+			Duration: 3 * time.Second,
+			Success:  true,
+		},
+	}
+
+	err := displayWaitResults(results, types.BuildStatusSucceeded)
+	if err != nil {
+		t.Errorf("displayWaitResults failed: %v", err)
+	}
+}
+
+func TestDisplayWaitResults_MixedResults(t *testing.T) {
+	results := []WaitResult{
+		{
+			Target:   "target1",
+			Status:   types.BuildStatusSucceeded,
+			Duration: 2 * time.Second,
+			Success:  true,
+		},
+		{
+			Target:   "target2",
+			Status:   types.BuildStatusBuilding,
+			Duration: 5 * time.Second,
+			TimedOut: true,
+		},
+		{
+			Target:   "target3",
+			Duration: 1 * time.Second,
+			Error:    fmt.Errorf("state file not found"),
+		},
+	}
+
+	err := displayWaitResults(results, types.BuildStatusSucceeded)
+	if err == nil {
+		t.Error("Expected error for mixed results")
+	}
+}
+
+// Test edge cases
+func TestRunWait_NoTargetsInConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Create empty config
+	createTestConfig(t, tempDir, []map[string]interface{}{})
+
+	// Should fail with no targets
+	err := runWait("", nil, "succeeded", 5, 1)
+	if err == nil {
+		t.Error("Expected error when no targets found")
+	}
+}
+
+func TestRunWait_InvalidConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Create invalid config file
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	err := os.WriteFile(configPath, []byte("invalid json"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create invalid config: %v", err)
+	}
+
+	// Should fail to load config
+	err = runWait("", nil, "succeeded", 5, 1)
+	if err == nil {
+		t.Error("Expected error for invalid config")
+	}
+}
+
+func TestRunWait_PollingInterval(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	createTestConfig(t, tempDir, []map[string]interface{}{
+		{
+			"name":         "poll-target",
+			"type":         "executable",
+			"buildCommand": "echo test",
+			"watchPaths":   []string{"*.go"},
+		},
+	})
+
+	// Create state manager and initialize target
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+	target := &mockTargetForWait{name: "poll-target"}
+	
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Set to building initially
+	err = sm.UpdateBuildStatus("poll-target", types.BuildStatusBuilding)
+	if err != nil {
+		t.Fatalf("Failed to set status: %v", err)
+	}
+
+	// Start wait with very short polling interval
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		sm.UpdateBuildStatus("poll-target", types.BuildStatusSucceeded)
+	}()
+
+	startTime := time.Now()
+	err = runWait("poll-target", nil, "succeeded", 3, 1) // 1 second poll interval
+	duration := time.Since(startTime)
+
+	if err != nil {
+		t.Errorf("runWait failed: %v", err)
+	}
+
+	// Should complete in reasonable time with fast polling
+	if duration > 2*time.Second {
+		t.Errorf("Wait took too long with short polling interval: %v", duration)
+	}
+}
+
+// Helper functions
+
+func createTestConfig(t *testing.T, tempDir string, targets []map[string]interface{}) {
+	config := map[string]interface{}{
+		"version":     "1.0",
+		"projectType": "mixed",
+		"targets":     targets,
+	}
+
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal config: %v", err)
+	}
+
+	err = os.WriteFile(configPath, data, 0644)
+	if err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+}
+
+func containsString(str, substr string) bool {
+	return len(substr) <= len(str) && (substr == "" || 
+		(len(substr) > 0 && len(str) >= len(substr) && 
+		 (str[:len(substr)] == substr || containsString(str[1:], substr))))
+}
+
+// Mock target for testing
+type mockTargetForWait struct {
+	name string
+}
+
+func (m *mockTargetForWait) GetName() string                 { return m.name }
+func (m *mockTargetForWait) GetType() types.TargetType       { return types.TargetTypeExecutable }
+func (m *mockTargetForWait) IsEnabled() bool                 { return true }
+func (m *mockTargetForWait) GetBuildCommand() string         { return "echo test" }
+func (m *mockTargetForWait) GetWatchPaths() []string         { return []string{"*.go"} }
+func (m *mockTargetForWait) GetSettlingDelay() int           { return 100 }
+func (m *mockTargetForWait) GetEnvironment() map[string]string { return nil }
+func (m *mockTargetForWait) GetMaxRetries() int              { return 3 }
+func (m *mockTargetForWait) GetBackoffMultiplier() float64   { return 2.0 }
+func (m *mockTargetForWait) GetDebounceInterval() int        { return 100 }
+func (m *mockTargetForWait) GetIcon() string                 { return "" }

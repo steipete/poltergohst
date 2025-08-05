@@ -1,0 +1,190 @@
+{
+  "version": "1.0",
+  "projectType": "mixed",
+  "targets": [
+    {
+      "name": "backend",
+      "type": "executable",
+      "buildCommand": "go build -o bin/server cmd/server/main.go",
+      "watchPaths": [
+        "cmd/server/**/*.go",
+        "internal/**/*.go",
+        "pkg/**/*.go",
+        "go.mod"
+      ],
+      "outputPath": "bin/server",
+      "environment": {
+        "CGO_ENABLED": "0",
+        "GOOS": "linux"
+      },
+      "settlingDelay": 1000,
+      "maxRetries": 3
+    },
+    {
+      "name": "frontend",
+      "type": "custom",
+      "buildCommand": "npm run build",
+      "watchPaths": [
+        "src/**/*.{js,jsx,ts,tsx}",
+        "public/**/*",
+        "package.json"
+      ],
+      "environment": {
+        "NODE_ENV": "production"
+      },
+      "debounceInterval": 500
+    },
+    {
+      "name": "tests",
+      "type": "test",
+      "testCommand": "go test -v ./...",
+      "watchPaths": [
+        "**/*_test.go",
+        "testdata/**/*"
+      ],
+      "coverageFile": "coverage.out",
+      "enabled": true
+    },
+    {
+      "name": "docker",
+      "type": "docker",
+      "buildCommand": "docker build",
+      "watchPaths": [
+        "Dockerfile",
+        "docker-compose.yml",
+        ".dockerignore"
+      ],
+      "imageName": "myapp",
+      "dockerfile": "Dockerfile",
+      "context": ".",
+      "tags": ["latest", "dev"],
+      "enabled": false
+    },
+    {
+      "name": "docs",
+      "type": "custom",
+      "buildCommand": "mkdocs build",
+      "watchPaths": [
+        "docs/**/*.md",
+        "mkdocs.yml"
+      ],
+      "config": {
+        "outputDir": "site",
+        "theme": "material"
+      }
+    },
+    {
+      "name": "proto",
+      "type": "custom",
+      "buildCommand": "protoc --go_out=. --go-grpc_out=. proto/*.proto",
+      "watchPaths": [
+        "proto/**/*.proto"
+      ],
+      "environment": {
+        "PATH": "/usr/local/bin:$PATH"
+      }
+    },
+    {
+      "name": "mobile-ios",
+      "type": "app-bundle",
+      "buildCommand": "xcodebuild -scheme MyApp -configuration Debug",
+      "watchPaths": [
+        "ios/**/*.swift",
+        "ios/**/*.m",
+        "ios/**/*.h",
+        "ios/**/*.storyboard"
+      ],
+      "platform": "ios",
+      "bundleId": "com.example.myapp",
+      "autoRelaunch": true,
+      "launchCommand": "xcrun simctl launch booted com.example.myapp"
+    },
+    {
+      "name": "lib-core",
+      "type": "library",
+      "buildCommand": "make lib",
+      "watchPaths": [
+        "lib/**/*.c",
+        "lib/**/*.h",
+        "Makefile"
+      ],
+      "outputPath": "build/libcore.a",
+      "libraryType": "static"
+    },
+    {
+      "name": "cmake-app",
+      "type": "cmake-executable",
+      "targetName": "myapp",
+      "buildType": "Debug",
+      "watchPaths": [
+        "src/**/*.cpp",
+        "include/**/*.h",
+        "CMakeLists.txt"
+      ],
+      "generator": "Unix Makefiles",
+      "cmakeArgs": ["-DENABLE_TESTS=ON"],
+      "parallel": true
+    }
+  ],
+  "watchman": {
+    "useDefaultExclusions": true,
+    "excludeDirs": [
+      "node_modules",
+      ".git",
+      "vendor",
+      "build",
+      "dist",
+      ".cache",
+      "coverage",
+      ".idea",
+      ".vscode",
+      "*.log",
+      "tmp",
+      "__pycache__"
+    ],
+    "projectType": "mixed",
+    "maxFileEvents": 1000,
+    "recrawlThreshold": 10000,
+    "settlingDelay": 1000,
+    "rules": [
+      {
+        "pattern": "*.generated.go",
+        "action": "ignore",
+        "reason": "Generated files",
+        "enabled": true
+      },
+      {
+        "pattern": "*.pb.go",
+        "action": "ignore",
+        "reason": "Protocol buffer generated files",
+        "enabled": true
+      }
+    ]
+  },
+  "performance": {
+    "profile": "balanced",
+    "autoOptimize": true,
+    "metrics": {
+      "enabled": true,
+      "reportInterval": 300
+    }
+  },
+  "buildScheduling": {
+    "parallelization": 3,
+    "prioritization": {
+      "enabled": true,
+      "focusDetectionWindow": 300000,
+      "priorityDecayTime": 1800000,
+      "buildTimeoutMultiplier": 2.0
+    }
+  },
+  "notifications": {
+    "enabled": true,
+    "successSound": "default",
+    "failureSound": "alert"
+  },
+  "logging": {
+    "file": ".poltergeist/poltergeist.log",
+    "level": "info"
+  }
+}

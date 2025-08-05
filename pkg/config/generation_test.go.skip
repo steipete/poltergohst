@@ -1,0 +1,599 @@
+package config_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/poltergeist/poltergeist/pkg/config"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestGenerateConfig_NodeProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create Node project structure
+	packageJSON := `{
+		"name": "test-project",
+		"version": "1.0.0",
+		"scripts": {
+			"build": "tsc",
+			"test": "jest",
+			"dev": "nodemon"
+		}
+	}`
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(packageJSON), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "src", "index.ts"), []byte("console.log('test')"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "tsconfig.json"), []byte("{}"), 0644)
+	
+	// Generate config
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	// Verify config
+	if cfg.ProjectType != types.ProjectTypeNode {
+		t.Errorf("expected Node project type, got %s", cfg.ProjectType)
+	}
+	
+	if len(cfg.Targets) == 0 {
+		t.Fatal("expected targets to be generated")
+	}
+	
+	// Parse first target
+	var target types.ExecutableTarget
+	if err := json.Unmarshal(cfg.Targets[0], &target); err != nil {
+		t.Fatalf("failed to parse target: %v", err)
+	}
+	
+	if target.Type != types.TargetTypeExecutable {
+		t.Errorf("expected executable target, got %s", target.Type)
+	}
+	
+	if target.BuildCommand != "npm run build" {
+		t.Errorf("expected 'npm run build', got %s", target.BuildCommand)
+	}
+	
+	// Check watch paths include TypeScript files
+	hasTS := false
+	for _, path := range target.WatchPaths {
+		if path == "**/*.ts" || path == "src/**/*.ts" {
+			hasTS = true
+			break
+		}
+	}
+	if !hasTS {
+		t.Error("expected TypeScript files in watch paths")
+	}
+	
+	// Check test target was created
+	if len(cfg.Targets) > 1 {
+		var testTarget types.TestTarget
+		if err := json.Unmarshal(cfg.Targets[1], &testTarget); err == nil {
+			if testTarget.Type != types.TargetTypeTest {
+				t.Errorf("expected test target, got %s", testTarget.Type)
+			}
+			if testTarget.TestCommand != "npm test" {
+				t.Errorf("expected 'npm test', got %s", testTarget.TestCommand)
+			}
+		}
+	}
+}
+
+func TestGenerateConfig_SwiftProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create Swift package structure
+	packageSwift := `// swift-tools-version:5.7
+import PackageDescription
+
+let package = Package(
+    name: "MyApp",
+    platforms: [.macOS(.v12)],
+    products: [
+        .executable(name: "MyApp", targets: ["MyApp"]),
+        .library(name: "MyLib", targets: ["MyLib"])
+    ],
+    targets: [
+        .executableTarget(name: "MyApp"),
+        .target(name: "MyLib"),
+        .testTarget(name: "MyAppTests")
+    ]
+)`
+	os.WriteFile(filepath.Join(tmpDir, "Package.swift"), []byte(packageSwift), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "Sources", "MyApp"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "Sources", "MyLib"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "Tests", "MyAppTests"), 0755)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	if cfg.ProjectType != types.ProjectTypeSwift {
+		t.Errorf("expected Swift project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should have 3 targets: executable, library, and test
+	if len(cfg.Targets) != 3 {
+		t.Errorf("expected 3 targets, got %d", len(cfg.Targets))
+	}
+	
+	// Verify executable target
+	var execTarget types.ExecutableTarget
+	if err := json.Unmarshal(cfg.Targets[0], &execTarget); err == nil {
+		if execTarget.Name != "MyApp" {
+			t.Errorf("expected target name 'MyApp', got %s", execTarget.Name)
+		}
+		if execTarget.BuildCommand != "swift build --product MyApp" {
+			t.Errorf("unexpected build command: %s", execTarget.BuildCommand)
+		}
+	}
+	
+	// Verify library target
+	var libTarget types.LibraryTarget
+	if err := json.Unmarshal(cfg.Targets[1], &libTarget); err == nil {
+		if libTarget.Name != "MyLib" {
+			t.Errorf("expected target name 'MyLib', got %s", libTarget.Name)
+		}
+		if libTarget.LibraryType != "dynamic" {
+			t.Errorf("expected dynamic library, got %s", libTarget.LibraryType)
+		}
+	}
+	
+	// Verify test target
+	var testTarget types.TestTarget
+	if err := json.Unmarshal(cfg.Targets[2], &testTarget); err == nil {
+		if testTarget.Name != "MyAppTests" {
+			t.Errorf("expected target name 'MyAppTests', got %s", testTarget.Name)
+		}
+		if testTarget.TestCommand != "swift test" {
+			t.Errorf("unexpected test command: %s", testTarget.TestCommand)
+		}
+	}
+}
+
+func TestGenerateConfig_RustProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create Rust project structure
+	cargoToml := `[package]
+name = "my_app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "my_app"
+path = "src/main.rs"
+
+[lib]
+name = "my_lib"
+path = "src/lib.rs"
+
+[dependencies]
+serde = "1.0"
+tokio = { version = "1", features = ["full"] }
+`
+	os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "src", "main.rs"), []byte("fn main() {}"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "lib.rs"), []byte(""), 0644)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	if cfg.ProjectType != types.ProjectTypeRust {
+		t.Errorf("expected Rust project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should have binary and library targets
+	if len(cfg.Targets) < 2 {
+		t.Fatalf("expected at least 2 targets, got %d", len(cfg.Targets))
+	}
+	
+	// Check for release and debug configurations
+	hasDebug := false
+	hasRelease := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		if name, ok := target["name"].(string); ok {
+			if name == "my_app-debug" {
+				hasDebug = true
+				if cmd, ok := target["buildCommand"].(string); ok {
+					if cmd != "cargo build --bin my_app" {
+						t.Errorf("unexpected debug build command: %s", cmd)
+					}
+				}
+			}
+			if name == "my_app-release" {
+				hasRelease = true
+				if cmd, ok := target["buildCommand"].(string); ok {
+					if cmd != "cargo build --release --bin my_app" {
+						t.Errorf("unexpected release build command: %s", cmd)
+					}
+				}
+			}
+		}
+	}
+	
+	if !hasDebug {
+		t.Error("missing debug configuration")
+	}
+	if !hasRelease {
+		t.Error("missing release configuration")
+	}
+}
+
+func TestGenerateConfig_PythonProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create Python project with pyproject.toml
+	pyprojectToml := `[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my_project"
+version = "0.1.0"
+dependencies = [
+    "requests>=2.28",
+    "pytest>=7.0"
+]
+
+[project.scripts]
+my-app = "my_project.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+`
+	os.WriteFile(filepath.Join(tmpDir, "pyproject.toml"), []byte(pyprojectToml), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "my_project"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "tests"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "my_project", "__init__.py"), []byte(""), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "my_project", "main.py"), []byte("def main(): pass"), 0644)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	if cfg.ProjectType != types.ProjectTypePython {
+		t.Errorf("expected Python project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should have main and test targets
+	if len(cfg.Targets) < 2 {
+		t.Fatalf("expected at least 2 targets, got %d", len(cfg.Targets))
+	}
+	
+	// Verify main target
+	var mainTarget types.ExecutableTarget
+	if err := json.Unmarshal(cfg.Targets[0], &mainTarget); err == nil {
+		if mainTarget.Name != "my_project" {
+			t.Errorf("expected target name 'my_project', got %s", mainTarget.Name)
+		}
+		if mainTarget.BuildCommand != "python -m build" && mainTarget.BuildCommand != "pip install -e ." {
+			t.Errorf("unexpected build command: %s", mainTarget.BuildCommand)
+		}
+		// Check Python files in watch paths
+		hasPy := false
+		for _, path := range mainTarget.WatchPaths {
+			if path == "**/*.py" || path == "my_project/**/*.py" {
+				hasPy = true
+				break
+			}
+		}
+		if !hasPy {
+			t.Error("expected Python files in watch paths")
+		}
+	}
+	
+	// Verify test target
+	var testTarget types.TestTarget
+	if err := json.Unmarshal(cfg.Targets[1], &testTarget); err == nil {
+		if testTarget.TestCommand != "pytest" && testTarget.TestCommand != "python -m pytest" {
+			t.Errorf("unexpected test command: %s", testTarget.TestCommand)
+		}
+	}
+}
+
+func TestGenerateConfig_CMakeProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create CMake project
+	cmakeLists := `cmake_minimum_required(VERSION 3.20)
+project(MyProject VERSION 1.0.0)
+
+set(CMAKE_CXX_STANDARD 17)
+
+add_executable(my_app src/main.cpp)
+add_library(my_lib src/lib.cpp)
+
+add_executable(my_tests tests/test_main.cpp)
+target_link_libraries(my_tests my_lib)
+
+enable_testing()
+add_test(NAME MyTests COMMAND my_tests)
+`
+	os.WriteFile(filepath.Join(tmpDir, "CMakeLists.txt"), []byte(cmakeLists), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "tests"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "src", "main.cpp"), []byte("int main() { return 0; }"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "lib.cpp"), []byte("void foo() {}"), 0644)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	if cfg.ProjectType != types.ProjectTypeCMake {
+		t.Errorf("expected CMake project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should detect CMake targets
+	if len(cfg.Targets) == 0 {
+		t.Fatal("expected targets to be generated")
+	}
+	
+	// Check for CMake build configurations
+	hasDebug := false
+	hasRelease := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		if name, ok := target["name"].(string); ok {
+			if name == "Debug" || name == "my_app-Debug" {
+				hasDebug = true
+			}
+			if name == "Release" || name == "my_app-Release" {
+				hasRelease = true
+			}
+		}
+	}
+	
+	if !hasDebug {
+		t.Error("missing Debug configuration")
+	}
+	if !hasRelease {
+		t.Error("missing Release configuration")
+	}
+}
+
+func TestGenerateConfig_MixedProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create mixed project with multiple build systems
+	os.WriteFile(filepath.Join(tmpDir, "Makefile"), []byte("all:\n\techo 'building'"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name": "frontend", "scripts": {"build": "webpack"}}`), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "requirements.txt"), []byte("flask\npytest"), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "backend"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "frontend"), 0755)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	if cfg.ProjectType != types.ProjectTypeMixed {
+		t.Errorf("expected Mixed project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should create targets for different components
+	if len(cfg.Targets) < 2 {
+		t.Errorf("expected multiple targets for mixed project, got %d", len(cfg.Targets))
+	}
+	
+	// Check for both frontend and backend targets
+	hasFrontend := false
+	hasBackend := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		if name, ok := target["name"].(string); ok {
+			if name == "frontend" {
+				hasFrontend = true
+			}
+			if name == "backend" {
+				hasBackend = true
+			}
+		}
+	}
+	
+	if !hasFrontend {
+		t.Error("missing frontend target")
+	}
+	if !hasBackend {
+		t.Error("missing backend target")
+	}
+}
+
+func TestGenerateConfig_DockerProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create Docker project
+	dockerfile := `FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+CMD ["npm", "start"]
+`
+	dockerCompose := `version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: mydb
+`
+	os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(dockerCompose), 0644)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	// Should detect Docker targets
+	hasDockerTarget := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		if targetType, ok := target["type"].(string); ok {
+			if targetType == string(types.TargetTypeDocker) {
+				hasDockerTarget = true
+				// Check Docker-specific fields
+				if _, ok := target["imageName"]; !ok {
+					t.Error("Docker target missing imageName")
+				}
+				if _, ok := target["dockerfile"]; !ok {
+					t.Error("Docker target missing dockerfile")
+				}
+			}
+		}
+	}
+	
+	if !hasDockerTarget {
+		t.Error("expected Docker target to be generated")
+	}
+}
+
+func TestGenerateConfig_MonorepoProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create monorepo structure
+	os.MkdirAll(filepath.Join(tmpDir, "packages", "api"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "packages", "web"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "packages", "shared"), 0755)
+	
+	// Root package.json with workspaces
+	rootPackage := `{
+		"name": "monorepo",
+		"private": true,
+		"workspaces": ["packages/*"],
+		"scripts": {
+			"build": "npm run build --workspaces",
+			"test": "npm test --workspaces"
+		}
+	}`
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(rootPackage), 0644)
+	
+	// Individual package.json files
+	apiPackage := `{"name": "@monorepo/api", "scripts": {"build": "tsc", "start": "node dist/index.js"}}`
+	webPackage := `{"name": "@monorepo/web", "scripts": {"build": "webpack", "start": "webpack serve"}}`
+	sharedPackage := `{"name": "@monorepo/shared", "scripts": {"build": "tsc"}}`
+	
+	os.WriteFile(filepath.Join(tmpDir, "packages", "api", "package.json"), []byte(apiPackage), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "packages", "web", "package.json"), []byte(webPackage), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "packages", "shared", "package.json"), []byte(sharedPackage), 0644)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	// Should create targets for each workspace
+	if len(cfg.Targets) < 3 {
+		t.Errorf("expected at least 3 targets for monorepo, got %d", len(cfg.Targets))
+	}
+	
+	// Check for workspace targets
+	hasAPI := false
+	hasWeb := false
+	hasShared := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		if name, ok := target["name"].(string); ok {
+			switch name {
+			case "api", "@monorepo/api":
+				hasAPI = true
+			case "web", "@monorepo/web":
+				hasWeb = true
+			case "shared", "@monorepo/shared":
+				hasShared = true
+			}
+		}
+	}
+	
+	if !hasAPI {
+		t.Error("missing API workspace target")
+	}
+	if !hasWeb {
+		t.Error("missing Web workspace target")
+	}
+	if !hasShared {
+		t.Error("missing Shared workspace target")
+	}
+}
+
+func TestGenerateConfig_WithExistingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create existing config
+	existingConfig := types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeNode,
+		Targets: []json.RawMessage{
+			json.RawMessage(`{"name": "existing", "type": "executable", "buildCommand": "custom build"}`),
+		},
+	}
+	
+	data, _ := json.Marshal(existingConfig)
+	os.WriteFile(filepath.Join(tmpDir, "poltergeist.config.json"), data, 0644)
+	
+	// Also create package.json to trigger generation
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name": "test"}`), 0644)
+	
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
+	
+	// Should preserve existing targets
+	foundExisting := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		if name, ok := target["name"].(string); ok && name == "existing" {
+			foundExisting = true
+			if cmd, ok := target["buildCommand"].(string); ok {
+				if cmd != "custom build" {
+					t.Error("existing target build command was modified")
+				}
+			}
+		}
+	}
+	
+	if !foundExisting {
+		t.Error("existing target was not preserved")
+	}
+}
+
+func TestGenerateConfig_InvalidProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Empty directory with no project files
+	cfg, err := config.GenerateConfig(tmpDir)
+	if err == nil {
+		t.Error("expected error for invalid project")
+	}
+	
+	// Should still return a basic config
+	if cfg == nil {
+		t.Fatal("expected basic config even on error")
+	}
+	
+	if cfg.ProjectType != types.ProjectTypeMixed {
+		t.Errorf("expected Mixed type for unknown project, got %s", cfg.ProjectType)
+	}
+}

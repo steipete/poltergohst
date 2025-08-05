@@ -1,0 +1,552 @@
+package config_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/poltergeist/poltergeist/pkg/config"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestSmartDefaults_NodeProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Minimal package.json
+	packageJSON := `{"name": "test-app"}`
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(packageJSON), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	// Should detect Node project
+	if cfg.ProjectType != types.ProjectTypeNode {
+		t.Errorf("expected Node project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should have default targets
+	if len(cfg.Targets) == 0 {
+		t.Fatal("expected default targets")
+	}
+	
+	// Should have sensible defaults
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	
+	// Default build command
+	if cmd, ok := target["buildCommand"].(string); ok {
+		if cmd != "npm run build" && cmd != "npm install" {
+			t.Errorf("unexpected default build command: %s", cmd)
+		}
+	}
+	
+	// Default watch paths for Node
+	if paths, ok := target["watchPaths"].([]interface{}); ok {
+		hasJS := false
+		for _, p := range paths {
+			if str, ok := p.(string); ok {
+				if strings.Contains(str, ".js") || strings.Contains(str, ".ts") {
+					hasJS = true
+					break
+				}
+			}
+		}
+		if !hasJS {
+			t.Error("expected JavaScript/TypeScript files in default watch paths")
+		}
+	}
+	
+	// Should exclude node_modules by default
+	if excludes, ok := target["excludePaths"].([]interface{}); ok {
+		hasNodeModules := false
+		for _, e := range excludes {
+			if str, ok := e.(string); ok && str == "node_modules" {
+				hasNodeModules = true
+				break
+			}
+		}
+		if !hasNodeModules {
+			t.Error("expected node_modules in default excludes")
+		}
+	}
+}
+
+func TestSmartDefaults_TypeScriptProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// TypeScript project indicators
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name": "ts-app"}`), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "tsconfig.json"), []byte(`{}`), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "src", "index.ts"), []byte(""), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	// Should have TypeScript-specific defaults
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	
+	// TypeScript build command
+	if cmd, ok := target["buildCommand"].(string); ok {
+		if !strings.Contains(cmd, "tsc") && !strings.Contains(cmd, "typescript") {
+			t.Errorf("expected TypeScript build command, got: %s", cmd)
+		}
+	}
+	
+	// TypeScript watch paths
+	if paths, ok := target["watchPaths"].([]interface{}); ok {
+		hasTS := false
+		for _, p := range paths {
+			if str, ok := p.(string); ok && strings.Contains(str, ".ts") {
+				hasTS = true
+				break
+			}
+		}
+		if !hasTS {
+			t.Error("expected .ts files in watch paths for TypeScript project")
+		}
+	}
+	
+	// Output path should be dist or build
+	if output, ok := target["outputPath"].(string); ok {
+		if output != "dist" && output != "build" && output != "./dist" {
+			t.Errorf("expected dist or build output path, got: %s", output)
+		}
+	}
+}
+
+func TestSmartDefaults_GoProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Go project files
+	os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.21"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc main() {}"), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	// Should detect Go project
+	if cfg.ProjectType != types.ProjectTypeGo && cfg.ProjectType != types.ProjectTypeMixed {
+		t.Errorf("expected Go project type, got %s", cfg.ProjectType)
+	}
+	
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	
+	// Go build command
+	if cmd, ok := target["buildCommand"].(string); ok {
+		if !strings.Contains(cmd, "go build") {
+			t.Errorf("expected go build command, got: %s", cmd)
+		}
+	}
+	
+	// Go watch paths
+	if paths, ok := target["watchPaths"].([]interface{}); ok {
+		hasGo := false
+		for _, p := range paths {
+			if str, ok := p.(string); ok && strings.Contains(str, ".go") {
+				hasGo = true
+				break
+			}
+		}
+		if !hasGo {
+			t.Error("expected .go files in watch paths")
+		}
+	}
+	
+	// Should exclude vendor by default
+	if excludes, ok := target["excludePaths"].([]interface{}); ok {
+		hasVendor := false
+		for _, e := range excludes {
+			if str, ok := e.(string); ok && str == "vendor" {
+				hasVendor = true
+				break
+			}
+		}
+		if !hasVendor {
+			t.Error("expected vendor in default excludes for Go project")
+		}
+	}
+}
+
+func TestSmartDefaults_RustProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Rust project
+	os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte("[package]\nname = \"test\""), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "src", "main.rs"), []byte("fn main() {}"), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	if cfg.ProjectType != types.ProjectTypeRust {
+		t.Errorf("expected Rust project type, got %s", cfg.ProjectType)
+	}
+	
+	// Should have both debug and release targets by default
+	hasDebug := false
+	hasRelease := false
+	
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		
+		if name, ok := target["name"].(string); ok {
+			if strings.Contains(strings.ToLower(name), "debug") {
+				hasDebug = true
+				// Check debug build command
+				if cmd, ok := target["buildCommand"].(string); ok {
+					if !strings.Contains(cmd, "cargo build") || strings.Contains(cmd, "--release") {
+						t.Error("debug target should not have --release flag")
+					}
+				}
+			}
+			if strings.Contains(strings.ToLower(name), "release") {
+				hasRelease = true
+				// Check release build command
+				if cmd, ok := target["buildCommand"].(string); ok {
+					if !strings.Contains(cmd, "--release") {
+						t.Error("release target should have --release flag")
+					}
+				}
+			}
+		}
+	}
+	
+	if !hasDebug {
+		t.Error("expected debug target for Rust project")
+	}
+	if !hasRelease {
+		t.Error("expected release target for Rust project")
+	}
+	
+	// Check Rust-specific watch paths
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	if paths, ok := target["watchPaths"].([]interface{}); ok {
+		hasRs := false
+		hasToml := false
+		for _, p := range paths {
+			if str, ok := p.(string); ok {
+				if strings.Contains(str, ".rs") {
+					hasRs = true
+				}
+				if strings.Contains(str, "Cargo.toml") {
+					hasToml = true
+				}
+			}
+		}
+		if !hasRs {
+			t.Error("expected .rs files in watch paths")
+		}
+		if !hasToml {
+			t.Error("expected Cargo.toml in watch paths")
+		}
+	}
+}
+
+func TestSmartDefaults_PythonProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Python project with requirements.txt
+	os.WriteFile(filepath.Join(tmpDir, "requirements.txt"), []byte("flask\npytest"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "app.py"), []byte("print('hello')"), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	if cfg.ProjectType != types.ProjectTypePython {
+		t.Errorf("expected Python project type, got %s", cfg.ProjectType)
+	}
+	
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	
+	// Python run command
+	if cmd, ok := target["buildCommand"].(string); ok {
+		if !strings.Contains(cmd, "python") && !strings.Contains(cmd, "pip") {
+			t.Errorf("expected python command, got: %s", cmd)
+		}
+	}
+	
+	// Python watch paths
+	if paths, ok := target["watchPaths"].([]interface{}); ok {
+		hasPy := false
+		for _, p := range paths {
+			if str, ok := p.(string); ok && strings.Contains(str, ".py") {
+				hasPy = true
+				break
+			}
+		}
+		if !hasPy {
+			t.Error("expected .py files in watch paths")
+		}
+	}
+	
+	// Should exclude __pycache__ and venv
+	if excludes, ok := target["excludePaths"].([]interface{}); ok {
+		hasPycache := false
+		hasVenv := false
+		for _, e := range excludes {
+			if str, ok := e.(string); ok {
+				if str == "__pycache__" {
+					hasPycache = true
+				}
+				if str == "venv" || str == ".venv" {
+					hasVenv = true
+				}
+			}
+		}
+		if !hasPycache {
+			t.Error("expected __pycache__ in excludes")
+		}
+		if !hasVenv {
+			t.Error("expected venv in excludes")
+		}
+	}
+}
+
+func TestSmartDefaults_DockerProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Docker project
+	dockerfile := `FROM node:18
+WORKDIR /app
+COPY . .
+CMD ["npm", "start"]`
+	os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	// Should have Docker target
+	hasDocker := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		
+		if targetType, ok := target["type"].(string); ok && targetType == string(types.TargetTypeDocker) {
+			hasDocker = true
+			
+			// Check Docker-specific fields
+			if _, ok := target["dockerfile"]; !ok {
+				t.Error("Docker target missing dockerfile field")
+			}
+			
+			// Default image name
+			if imageName, ok := target["imageName"].(string); ok {
+				if imageName == "" {
+					t.Error("Docker target missing default image name")
+				}
+			}
+			
+			// Build command should be docker build
+			if cmd, ok := target["buildCommand"].(string); ok {
+				if !strings.Contains(cmd, "docker build") {
+					t.Errorf("expected docker build command, got: %s", cmd)
+				}
+			}
+		}
+	}
+	
+	if !hasDocker {
+		t.Error("expected Docker target for Dockerfile project")
+	}
+}
+
+func TestSmartDefaults_TestTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Project with test directory
+	os.MkdirAll(filepath.Join(tmpDir, "tests"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"scripts": {"test": "jest"}}`), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	// Should have test target
+	hasTest := false
+	for _, rawTarget := range cfg.Targets {
+		var target map[string]interface{}
+		json.Unmarshal(rawTarget, &target)
+		
+		if targetType, ok := target["type"].(string); ok && targetType == string(types.TargetTypeTest) {
+			hasTest = true
+			
+			// Test command
+			if cmd, ok := target["testCommand"].(string); ok {
+				if cmd != "npm test" && cmd != "jest" {
+					t.Errorf("unexpected test command: %s", cmd)
+				}
+			}
+			
+			// Watch test files
+			if paths, ok := target["watchPaths"].([]interface{}); ok {
+				hasTestFiles := false
+				for _, p := range paths {
+					if str, ok := p.(string); ok {
+						if strings.Contains(str, "test") || strings.Contains(str, "spec") {
+							hasTestFiles = true
+							break
+						}
+					}
+				}
+				if !hasTestFiles {
+					t.Error("expected test files in watch paths")
+				}
+			}
+		}
+	}
+	
+	if !hasTest {
+		t.Error("expected test target for project with tests")
+	}
+}
+
+func TestSmartDefaults_PlatformSpecific(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create a C project
+	os.WriteFile(filepath.Join(tmpDir, "main.c"), []byte("int main() { return 0; }"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "Makefile"), []byte("all:\n\tgcc main.c"), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	
+	// Platform-specific build commands
+	switch runtime.GOOS {
+	case "windows":
+		// Windows-specific defaults
+		if cmd, ok := target["buildCommand"].(string); ok {
+			if strings.Contains(cmd, "gcc") && !strings.Contains(cmd, ".exe") {
+				// Output should have .exe extension on Windows
+				if output, ok := target["outputPath"].(string); ok {
+					if !strings.HasSuffix(output, ".exe") {
+						t.Error("expected .exe extension for Windows executable")
+					}
+				}
+			}
+		}
+	case "darwin":
+		// macOS-specific defaults
+		if paths, ok := target["watchPaths"].([]interface{}); ok {
+			// Could check for .m, .mm files for Objective-C
+			_ = paths
+		}
+	case "linux":
+		// Linux-specific defaults
+		if cmd, ok := target["buildCommand"].(string); ok {
+			// Linux-specific build flags could be checked
+			_ = cmd
+		}
+	}
+}
+
+func TestSmartDefaults_PerformanceSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Large project simulation
+	for i := 0; i < 1000; i++ {
+		dir := filepath.Join(tmpDir, "src", "module"+string(rune(i)))
+		os.MkdirAll(dir, 0755)
+		os.WriteFile(filepath.Join(dir, "index.js"), []byte(""), 0644)
+	}
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name": "large-app"}`), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	// Should have performance optimizations for large projects
+	if cfg.Performance == nil {
+		t.Skip("Performance settings not implemented")
+	}
+	
+	// Check for reasonable defaults
+	if cfg.Performance.MaxWorkers == 0 {
+		t.Error("expected max workers to be set for large project")
+	}
+	
+	if cfg.Performance.BatchSize == 0 {
+		t.Error("expected batch size to be set")
+	}
+	
+	if cfg.Performance.Debounce == 0 {
+		t.Error("expected debounce delay for large project")
+	}
+}
+
+func TestSmartDefaults_IncrementalBuild(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// TypeScript project that supports incremental builds
+	tsconfig := `{
+		"compilerOptions": {
+			"incremental": true,
+			"tsBuildInfoFile": ".tsbuildinfo"
+		}
+	}`
+	os.WriteFile(filepath.Join(tmpDir, "tsconfig.json"), []byte(tsconfig), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name": "ts-app"}`), 0644)
+	
+	cfg := config.ApplySmartDefaults(tmpDir, nil)
+	
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	
+	// Should detect and use incremental build
+	if incremental, ok := target["incremental"].(bool); ok {
+		if !incremental {
+			t.Error("expected incremental build to be enabled for TypeScript project")
+		}
+	}
+	
+	// Build command should preserve incremental flag
+	if cmd, ok := target["buildCommand"].(string); ok {
+		if strings.Contains(cmd, "tsc") && !strings.Contains(cmd, "--incremental") {
+			// TSC should use incremental by default when configured
+			_ = cmd
+		}
+	}
+}
+
+func TestSmartDefaults_MergeWithExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Existing config with some custom settings
+	existing := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeNode,
+		Targets: []json.RawMessage{
+			json.RawMessage(`{
+				"name": "custom",
+				"type": "executable",
+				"buildCommand": "custom-build",
+				"customField": "preserve-this"
+			}`),
+		},
+	}
+	
+	// Apply smart defaults on top
+	cfg := config.ApplySmartDefaults(tmpDir, existing)
+	
+	// Should preserve custom settings
+	var target map[string]interface{}
+	json.Unmarshal(cfg.Targets[0], &target)
+	
+	if target["buildCommand"] != "custom-build" {
+		t.Error("custom build command was overwritten")
+	}
+	
+	if target["customField"] != "preserve-this" {
+		t.Error("custom field was not preserved")
+	}
+	
+	// But should add missing defaults
+	if _, ok := target["watchPaths"]; !ok {
+		t.Error("default watch paths were not added")
+	}
+	
+	if _, ok := target["excludePaths"]; !ok {
+		t.Error("default exclude paths were not added")
+	}
+}

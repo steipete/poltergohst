@@ -1,0 +1,609 @@
+package config_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/poltergeist/poltergeist/pkg/config"
+	"github.com/poltergeist/poltergeist/pkg/logger"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestReloadManager_StartStopWatching(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config file
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Test starting watching
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	
+	if !rm.IsWatching() {
+		t.Error("Manager should be watching after StartWatching")
+	}
+	
+	// Test starting again (should error)
+	err = rm.StartWatching()
+	if err == nil {
+		t.Error("Expected error when starting watch again")
+	}
+	
+	// Test stopping watching
+	err = rm.StopWatching()
+	if err != nil {
+		t.Errorf("Failed to stop watching: %v", err)
+	}
+	
+	if rm.IsWatching() {
+		t.Error("Manager should not be watching after StopWatching")
+	}
+	
+	// Test stopping again (should not error)
+	err = rm.StopWatching()
+	if err != nil {
+		t.Errorf("Should not error when stopping watch again: %v", err)
+	}
+}
+
+func TestReloadManager_ConfigChangeDetection(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config file
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Track callback invocations
+	var callbackConfig *types.PoltergeistConfig
+	var callbackError error
+	var callbackMu sync.Mutex
+	callbackCount := 0
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
+		callbackConfig = cfg
+		callbackError = err
+		callbackCount++
+	})
+	
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	defer rm.StopWatching()
+	
+	// Wait a moment to ensure watcher is ready
+	time.Sleep(100 * time.Millisecond)
+	
+	// Modify config file
+	createTestConfig(t, configPath, "2.0", []string{"target1", "target2"})
+	
+	// Wait for change detection and callback
+	time.Sleep(1 * time.Second)
+	
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
+	
+	if callbackCount == 0 {
+		t.Error("Expected callback to be invoked after config change")
+	}
+	
+	if callbackError != nil {
+		t.Errorf("Expected no callback error, got: %v", callbackError)
+	}
+	
+	if callbackConfig == nil {
+		t.Fatal("Expected config in callback, got nil")
+	}
+	
+	if callbackConfig.Version != "2.0" {
+		t.Errorf("Expected updated version '2.0', got '%s'", callbackConfig.Version)
+	}
+	
+	if len(callbackConfig.Targets) != 2 {
+		t.Errorf("Expected 2 targets after update, got %d", len(callbackConfig.Targets))
+	}
+}
+
+func TestReloadManager_InvalidConfigChange(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial valid config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Track callback invocations
+	var callbackError error
+	var callbackMu sync.Mutex
+	callbackCount := 0
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
+		callbackError = err
+		callbackCount++
+	})
+	
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	defer rm.StopWatching()
+	
+	// Wait for watcher to be ready
+	time.Sleep(100 * time.Millisecond)
+	
+	// Write invalid JSON
+	err = os.WriteFile(configPath, []byte(`{"invalid": json`), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write invalid config: %v", err)
+	}
+	
+	// Wait for change detection
+	time.Sleep(1 * time.Second)
+	
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
+	
+	if callbackCount == 0 {
+		t.Error("Expected callback to be invoked after invalid config change")
+	}
+	
+	if callbackError == nil {
+		t.Error("Expected callback error for invalid config")
+	}
+}
+
+func TestReloadManager_ConfigFileRemoval(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Track callback invocations
+	var callbackError error
+	var callbackMu sync.Mutex
+	callbackCount := 0
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
+		callbackError = err
+		callbackCount++
+	})
+	
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	defer rm.StopWatching()
+	
+	// Wait for watcher to be ready
+	time.Sleep(100 * time.Millisecond)
+	
+	// Remove config file
+	err = os.Remove(configPath)
+	if err != nil {
+		t.Fatalf("Failed to remove config file: %v", err)
+	}
+	
+	// Wait for change detection
+	time.Sleep(1 * time.Second)
+	
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
+	
+	if callbackCount == 0 {
+		t.Error("Expected callback to be invoked after config removal")
+	}
+	
+	if callbackError == nil {
+		t.Error("Expected callback error for removed config")
+	}
+}
+
+func TestReloadManager_MultipleCallbacks(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Add multiple callbacks
+	var callback1Count, callback2Count int
+	var mu1, mu2 sync.Mutex
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		mu1.Lock()
+		defer mu1.Unlock()
+		callback1Count++
+	})
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		mu2.Lock()
+		defer mu2.Unlock()
+		callback2Count++
+	})
+	
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	defer rm.StopWatching()
+	
+	// Wait for watcher to be ready
+	time.Sleep(100 * time.Millisecond)
+	
+	// Modify config
+	createTestConfig(t, configPath, "2.0", []string{"target1", "target2"})
+	
+	// Wait for callbacks
+	time.Sleep(1 * time.Second)
+	
+	mu1.Lock()
+	count1 := callback1Count
+	mu1.Unlock()
+	
+	mu2.Lock()
+	count2 := callback2Count
+	mu2.Unlock()
+	
+	if count1 == 0 {
+		t.Error("Expected first callback to be invoked")
+	}
+	
+	if count2 == 0 {
+		t.Error("Expected second callback to be invoked")
+	}
+}
+
+func TestReloadManager_RemoveAllCallbacks(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Add callbacks
+	callbackCount := 0
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackCount++
+	})
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackCount++
+	})
+	
+	// Remove all callbacks
+	rm.RemoveAllCallbacks()
+	
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	defer rm.StopWatching()
+	
+	// Wait for watcher to be ready
+	time.Sleep(100 * time.Millisecond)
+	
+	// Modify config
+	createTestConfig(t, configPath, "2.0", []string{"target1", "target2"})
+	
+	// Wait for potential callbacks
+	time.Sleep(1 * time.Second)
+	
+	if callbackCount != 0 {
+		t.Errorf("Expected no callbacks after removal, got %d", callbackCount)
+	}
+}
+
+func TestReloadManager_TriggerReload(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Track callback invocations
+	var callbackConfig *types.PoltergeistConfig
+	var callbackMu sync.Mutex
+	callbackCount := 0
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
+		callbackConfig = cfg
+		callbackCount++
+	})
+	
+	// Trigger manual reload
+	rm.TriggerReload()
+	
+	// Wait for callback
+	time.Sleep(100 * time.Millisecond)
+	
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
+	
+	if callbackCount == 0 {
+		t.Error("Expected callback after manual trigger")
+	}
+	
+	if callbackConfig == nil {
+		t.Fatal("Expected config in callback")
+	}
+	
+	if callbackConfig.Version != "1.0" {
+		t.Errorf("Expected version '1.0', got '%s'", callbackConfig.Version)
+	}
+}
+
+func TestReloadManager_DebouncePeriod(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Set short debounce period for testing
+	rm.SetDebouncePeriod(200 * time.Millisecond)
+	
+	callbackCount := 0
+	var callbackMu sync.Mutex
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
+		callbackCount++
+	})
+	
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	defer rm.StopWatching()
+	
+	// Wait for watcher to be ready
+	time.Sleep(100 * time.Millisecond)
+	
+	// Make multiple rapid changes
+	for i := 0; i < 5; i++ {
+		createTestConfig(t, configPath, "1.0", []string{fmt.Sprintf("target%d", i)})
+		time.Sleep(50 * time.Millisecond) // Shorter than debounce period
+	}
+	
+	// Wait for debounce period plus some buffer
+	time.Sleep(500 * time.Millisecond)
+	
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
+	
+	// Should only have 1 callback due to debouncing
+	if callbackCount != 1 {
+		t.Errorf("Expected 1 callback due to debouncing, got %d", callbackCount)
+	}
+}
+
+func TestReloadManager_GetLastReloadTime(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Initially should be zero time
+	if !rm.GetLastReloadTime().IsZero() {
+		t.Error("Expected zero time initially")
+	}
+	
+	// Trigger reload
+	rm.TriggerReload()
+	
+	// Wait a bit
+	time.Sleep(100 * time.Millisecond)
+	
+	// Should now have a non-zero time
+	if rm.GetLastReloadTime().IsZero() {
+		t.Error("Expected non-zero time after reload")
+	}
+}
+
+func TestReloadManager_GetConfigPath(t *testing.T) {
+	configPath := "/path/to/config.json"
+	log := logger.NewMemoryLogger()
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	if rm.GetConfigPath() != configPath {
+		t.Errorf("Expected config path '%s', got '%s'", configPath, rm.GetConfigPath())
+	}
+}
+
+func TestReloadManager_NonExistentConfigPath(t *testing.T) {
+	configPath := "/nonexistent/config.json"
+	log := logger.NewMemoryLogger()
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	// Should error when trying to watch nonexistent path
+	err := rm.StartWatching()
+	if err == nil {
+		t.Error("Expected error when watching nonexistent config path")
+	}
+}
+
+func TestReloadManager_ConcurrentAccess(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	var wg sync.WaitGroup
+	numGoroutines := 10
+	
+	// Start multiple goroutines adding/removing callbacks
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			
+			// Add callback
+			rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+				// Do nothing
+			})
+			
+			// Trigger reload
+			rm.TriggerReload()
+			
+			// Try to start/stop watching (will error but shouldn't crash)
+			rm.StartWatching()
+			rm.StopWatching()
+		}(i)
+	}
+	
+	// Wait for all goroutines to complete
+	done := make(chan bool)
+	go func() {
+		wg.Wait()
+		done <- true
+	}()
+	
+	select {
+	case <-done:
+		// Success - no crashes
+	case <-time.After(5 * time.Second):
+		t.Fatal("Concurrent access test timed out")
+	}
+}
+
+func TestReloadManager_LongRunningWatch(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	log := logger.NewMemoryLogger()
+	
+	// Create initial config
+	createTestConfig(t, configPath, "1.0", []string{"target1"})
+	
+	rm := config.NewReloadManager(configPath, log)
+	
+	callbackCount := 0
+	var callbackMu sync.Mutex
+	
+	rm.AddCallback(func(cfg *types.PoltergeistConfig, err error) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
+		callbackCount++
+	})
+	
+	err := rm.StartWatching()
+	if err != nil {
+		t.Fatalf("Failed to start watching: %v", err)
+	}
+	
+	// Make several changes over time
+	changes := []struct {
+		version string
+		targets []string
+	}{
+		{"2.0", []string{"target1", "target2"}},
+		{"3.0", []string{"target1", "target2", "target3"}},
+		{"4.0", []string{"target1"}},
+	}
+	
+	for _, change := range changes {
+		time.Sleep(300 * time.Millisecond) // Wait between changes
+		createTestConfig(t, configPath, change.version, change.targets)
+	}
+	
+	// Wait for all changes to be processed
+	time.Sleep(1 * time.Second)
+	
+	rm.StopWatching()
+	
+	callbackMu.Lock()
+	finalCount := callbackCount
+	callbackMu.Unlock()
+	
+	if finalCount != len(changes) {
+		t.Errorf("Expected %d callbacks for %d changes, got %d", len(changes), len(changes), finalCount)
+	}
+}
+
+// Helper functions
+
+func createTestConfig(t *testing.T, configPath, version string, targetNames []string) {
+	targets := make([]map[string]interface{}, len(targetNames))
+	for i, name := range targetNames {
+		targets[i] = map[string]interface{}{
+			"name":         name,
+			"type":         "executable",
+			"buildCommand": "echo test",
+			"watchPaths":   []string{"*.go"},
+		}
+	}
+	
+	config := map[string]interface{}{
+		"version":     version,
+		"projectType": "mixed",
+		"targets":     targets,
+	}
+	
+	// Ensure directory exists
+	configDir := filepath.Dir(configPath)
+	err := os.MkdirAll(configDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create config directory: %v", err)
+	}
+	
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal config: %v", err)
+	}
+	
+	err = os.WriteFile(configPath, data, 0644)
+	if err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+}

@@ -1,0 +1,92 @@
+{
+  "version": "1.0",
+  "projectType": "go",
+  "projectName": "Go API Server",
+  "performanceProfile": "balanced",
+  "targets": [
+    {
+      "name": "api",
+      "displayName": "API Server",
+      "type": "executable",
+      "buildCommand": "go build -o bin/api ./cmd/api",
+      "outputPath": "bin/api",
+      "watchPaths": [
+        "cmd/api/**/*.go",
+        "internal/**/*.go",
+        "pkg/**/*.go",
+        "go.mod",
+        "go.sum"
+      ],
+      "excludePaths": [
+        "**/*_test.go",
+        "vendor/**",
+        ".git/**"
+      ],
+      "env": {
+        "CGO_ENABLED": "0",
+        "GOOS": "linux",
+        "GOARCH": "amd64"
+      },
+      "buildOptions": {
+        "cleanBeforeBuild": true,
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "test",
+      "displayName": "Unit Tests",
+      "type": "test",
+      "buildCommand": "go test -v ./...",
+      "watchPaths": [
+        "**/*.go",
+        "go.mod"
+      ],
+      "excludePaths": [
+        "vendor/**",
+        ".git/**"
+      ],
+      "priority": 90
+    },
+    {
+      "name": "lint",
+      "displayName": "Linter",
+      "type": "custom",
+      "buildCommand": "golangci-lint run",
+      "watchPaths": [
+        "**/*.go",
+        ".golangci.yml"
+      ],
+      "priority": 50,
+      "continueOnError": true
+    }
+  ],
+  "watchmanConfig": {
+    "useDefaultExclusions": true,
+    "excludeDirs": [
+      ".git",
+      "vendor",
+      "bin",
+      "dist",
+      ".idea",
+      ".vscode"
+    ],
+    "settlingDelay": 200,
+    "maxFileEvents": 1000
+  },
+  "buildScheduling": {
+    "parallelization": 2,
+    "prioritization": {
+      "enabled": true,
+      "defaultPriority": 100,
+      "recentEditBoost": 50,
+      "dependencyMultiplier": 1.5
+    }
+  },
+  "notifications": {
+    "enabled": true,
+    "sound": true,
+    "buildStart": false,
+    "buildSuccess": true,
+    "buildFailure": true
+  }
+}

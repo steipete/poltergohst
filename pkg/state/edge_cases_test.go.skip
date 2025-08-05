@@ -1,0 +1,584 @@
+package state_test
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/poltergeist/poltergeist/pkg/logger"
+	"github.com/poltergeist/poltergeist/pkg/state"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+// Test concurrent access to state manager
+func TestStateManager_ConcurrentAccess(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	target := &mockTarget{name: "concurrent-target"}
+	
+	// Initialize state
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Test concurrent reads and writes
+	var wg sync.WaitGroup
+	numGoroutines := 50
+	errChan := make(chan error, numGoroutines*2)
+
+	// Concurrent reads
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				_, err := sm.ReadState("concurrent-target")
+				if err != nil {
+					errChan <- fmt.Errorf("read error in goroutine %d: %v", id, err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	// Concurrent writes
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				updates := map[string]interface{}{
+					"buildCount": id*10 + j,
+					"lastError":  fmt.Sprintf("error-%d-%d", id, j),
+				}
+				err := sm.UpdateState("concurrent-target", updates)
+				if err != nil {
+					errChan <- fmt.Errorf("write error in goroutine %d: %v", id, err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	for err := range errChan {
+		t.Error(err)
+	}
+
+	// Verify final state is consistent
+	finalState, err := sm.ReadState("concurrent-target")
+	if err != nil {
+		t.Fatalf("Failed to read final state: %v", err)
+	}
+
+	if finalState.TargetName != "concurrent-target" {
+		t.Errorf("State corruption: expected target name 'concurrent-target', got '%s'", finalState.TargetName)
+	}
+}
+
+// Test state persistence across process restarts
+func TestStateManager_ProcessRestart(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+
+	target := &mockTarget{name: "persistent-target"}
+	
+	// First process
+	{
+		sm1 := state.NewStateManager(tempDir, log)
+		
+		// Initialize and update state
+		state1, err := sm1.InitializeState(target)
+		if err != nil {
+			t.Fatalf("Failed to initialize state: %v", err)
+		}
+
+		updates := map[string]interface{}{
+			"buildCount":    42,
+			"failureCount":  3,
+			"lastError":     "test error",
+			"buildDuration": 5 * time.Second,
+		}
+		
+		err = sm1.UpdateState("persistent-target", updates)
+		if err != nil {
+			t.Fatalf("Failed to update state: %v", err)
+		}
+
+		// Verify state
+		if state1.BuildCount != 42 {
+			t.Errorf("Expected build count 42, got %d", state1.BuildCount)
+		}
+	}
+
+	// Second process (simulating restart)
+	{
+		sm2 := state.NewStateManager(tempDir, log)
+		
+		// Read existing state
+		state2, err := sm2.ReadState("persistent-target")
+		if err != nil {
+			t.Fatalf("Failed to read persisted state: %v", err)
+		}
+
+		// Verify persisted values
+		if state2.BuildCount != 42 {
+			t.Errorf("Build count not persisted: expected 42, got %d", state2.BuildCount)
+		}
+		if state2.FailureCount != 3 {
+			t.Errorf("Failure count not persisted: expected 3, got %d", state2.FailureCount)
+		}
+		if state2.LastError != "test error" {
+			t.Errorf("Last error not persisted: expected 'test error', got '%s'", state2.LastError)
+		}
+		if state2.BuildDuration != 5*time.Second {
+			t.Errorf("Build duration not persisted: expected 5s, got %v", state2.BuildDuration)
+		}
+	}
+}
+
+// Test corrupted state file handling
+func TestStateManager_CorruptedStateFile(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	// Create corrupted state file
+	stateDir := filepath.Join(tempDir, ".poltergeist", "state")
+	err := os.MkdirAll(stateDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create state directory: %v", err)
+	}
+
+	corruptedContent := `{"targetName": "corrupted", "invalid-json`
+	stateFile := filepath.Join(stateDir, "corrupted-target.json")
+	err = os.WriteFile(stateFile, []byte(corruptedContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write corrupted state file: %v", err)
+	}
+
+	// Try to read corrupted state
+	_, err = sm.ReadState("corrupted-target")
+	if err == nil {
+		t.Error("Expected error when reading corrupted state file")
+	}
+
+	// State manager should recover by creating new state
+	target := &mockTarget{name: "corrupted-target"}
+	newState, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state after corruption: %v", err)
+	}
+
+	if newState.TargetName != "corrupted-target" {
+		t.Errorf("Recovery failed: expected target name 'corrupted-target', got '%s'", newState.TargetName)
+	}
+}
+
+// Test state file atomic writes
+func TestStateManager_AtomicWrites(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	target := &mockTarget{name: "atomic-target"}
+	
+	// Initialize state
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Simulate write interruption by monitoring filesystem
+	stateDir := filepath.Join(tempDir, ".poltergeist", "state")
+	stateFile := filepath.Join(stateDir, "atomic-target.json")
+	tempFile := stateFile + ".tmp"
+
+	// Perform multiple rapid updates
+	numUpdates := 100
+	for i := 0; i < numUpdates; i++ {
+		updates := map[string]interface{}{
+			"buildCount": i,
+		}
+		
+		err = sm.UpdateState("atomic-target", updates)
+		if err != nil {
+			t.Fatalf("Failed to update state at iteration %d: %v", i, err)
+		}
+
+		// Verify temp file doesn't exist (atomic write completed)
+		if _, err := os.Stat(tempFile); err == nil {
+			t.Errorf("Temporary file still exists after update %d", i)
+		}
+
+		// Verify main file exists and is readable
+		if _, err := os.Stat(stateFile); os.IsNotExist(err) {
+			t.Errorf("State file missing after update %d", i)
+		}
+	}
+
+	// Verify final state integrity
+	finalState, err := sm.ReadState("atomic-target")
+	if err != nil {
+		t.Fatalf("Failed to read final state: %v", err)
+	}
+
+	if finalState.BuildCount != numUpdates-1 {
+		t.Errorf("Final build count mismatch: expected %d, got %d", numUpdates-1, finalState.BuildCount)
+	}
+}
+
+// Test state locking mechanism
+func TestStateManager_StateLocking(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+
+	target := &mockTarget{name: "locked-target"}
+
+	// First state manager (simulating first process)
+	sm1 := state.NewStateManager(tempDir, log)
+	_, err := sm1.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state in first manager: %v", err)
+	}
+
+	// Second state manager (simulating second process)
+	sm2 := state.NewStateManager(tempDir, log)
+
+	// Check if target is locked by first process
+	locked, err := sm2.IsLocked("locked-target")
+	if err != nil {
+		t.Fatalf("Failed to check lock status: %v", err)
+	}
+
+	// Should not be locked by different PID with recent heartbeat
+	if locked {
+		t.Error("Target should not be locked by same process")
+	}
+
+	// Simulate stale lock by modifying heartbeat
+	updates := map[string]interface{}{
+		"heartbeat": time.Now().Add(-2 * time.Minute), // 2 minutes ago
+	}
+	err = sm1.UpdateState("locked-target", updates)
+	if err != nil {
+		t.Fatalf("Failed to update heartbeat: %v", err)
+	}
+
+	// Now should not be locked (stale heartbeat)
+	locked, err = sm2.IsLocked("locked-target")
+	if err != nil {
+		t.Fatalf("Failed to check stale lock status: %v", err)
+	}
+
+	if locked {
+		t.Error("Target should not be locked with stale heartbeat")
+	}
+}
+
+// Test heartbeat mechanism
+func TestStateManager_Heartbeat(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	target := &mockTarget{name: "heartbeat-target"}
+	
+	// Initialize state
+	initialState, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	initialHeartbeat := initialState.Heartbeat
+
+	// Start heartbeat
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	
+	sm.StartHeartbeat(ctx)
+	defer sm.StopHeartbeat()
+
+	// Wait for heartbeat updates
+	time.Sleep(1500 * time.Millisecond)
+
+	// Read state to check heartbeat update
+	updatedState, err := sm.ReadState("heartbeat-target")
+	if err != nil {
+		t.Fatalf("Failed to read updated state: %v", err)
+	}
+
+	if !updatedState.Heartbeat.After(initialHeartbeat) {
+		t.Error("Heartbeat was not updated")
+	}
+
+	// Verify multiple heartbeat updates
+	secondHeartbeat := updatedState.Heartbeat
+	time.Sleep(1500 * time.Millisecond)
+
+	finalState, err := sm.ReadState("heartbeat-target")
+	if err != nil {
+		t.Fatalf("Failed to read final state: %v", err)
+	}
+
+	if !finalState.Heartbeat.After(secondHeartbeat) {
+		t.Error("Second heartbeat was not updated")
+	}
+}
+
+// Test state discovery with mixed conditions
+func TestStateManager_DiscoveryEdgeCases(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	stateDir := filepath.Join(tempDir, ".poltergeist", "state")
+	err := os.MkdirAll(stateDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create state directory: %v", err)
+	}
+
+	// Create valid state file
+	validTarget := &mockTarget{name: "valid"}
+	_, err = sm.InitializeState(validTarget)
+	if err != nil {
+		t.Fatalf("Failed to create valid state: %v", err)
+	}
+
+	// Create corrupted state file
+	corruptedFile := filepath.Join(stateDir, "corrupted.json")
+	err = os.WriteFile(corruptedFile, []byte("invalid json"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create corrupted file: %v", err)
+	}
+
+	// Create non-JSON file
+	nonJSONFile := filepath.Join(stateDir, "not-state.txt")
+	err = os.WriteFile(nonJSONFile, []byte("not json"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create non-JSON file: %v", err)
+	}
+
+	// Create empty JSON file
+	emptyFile := filepath.Join(stateDir, "empty.json")
+	err = os.WriteFile(emptyFile, []byte("{}"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create empty file: %v", err)
+	}
+
+	// Discover states
+	states, err := sm.DiscoverStates()
+	if err != nil {
+		t.Fatalf("Failed to discover states: %v", err)
+	}
+
+	// Should only find valid state
+	if len(states) != 1 {
+		t.Errorf("Expected 1 valid state, found %d", len(states))
+	}
+
+	if _, ok := states["valid"]; !ok {
+		t.Error("Valid state not found in discovery")
+	}
+
+	// Verify corrupted and non-JSON files were skipped
+	if _, ok := states["corrupted"]; ok {
+		t.Error("Corrupted state should not be discovered")
+	}
+}
+
+// Test state cleanup on process exit
+func TestStateManager_Cleanup(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	// Create multiple targets
+	targets := []string{"target1", "target2", "target3"}
+	for _, name := range targets {
+		target := &mockTarget{name: name}
+		_, err := sm.InitializeState(target)
+		if err != nil {
+			t.Fatalf("Failed to initialize state for %s: %v", name, err)
+		}
+
+		// Set building status
+		err = sm.UpdateBuildStatus(name, types.BuildStatusBuilding)
+		if err != nil {
+			t.Fatalf("Failed to set building status for %s: %v", name, err)
+		}
+	}
+
+	// Start heartbeat
+	ctx, cancel := context.WithCancel(context.Background())
+	sm.StartHeartbeat(ctx)
+
+	// Cleanup (simulating process exit)
+	err := sm.Cleanup()
+	if err != nil {
+		t.Fatalf("Failed to cleanup: %v", err)
+	}
+	cancel()
+
+	// Verify all states are cleaned up (status reset, process ID cleared)
+	for _, name := range targets {
+		finalState, err := sm.ReadState(name)
+		if err != nil {
+			t.Fatalf("Failed to read final state for %s: %v", name, err)
+		}
+
+		if finalState.BuildStatus != types.BuildStatusIdle {
+			t.Errorf("Status not reset for %s: expected idle, got %s", name, finalState.BuildStatus)
+		}
+
+		if finalState.ProcessID != 0 {
+			t.Errorf("Process ID not cleared for %s: expected 0, got %d", name, finalState.ProcessID)
+		}
+	}
+}
+
+// Test state updates with invalid data types
+func TestStateManager_InvalidUpdates(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	target := &mockTarget{name: "invalid-updates"}
+	
+	// Initialize state
+	_, err := sm.InitializeState(target)
+	if err != nil {
+		t.Fatalf("Failed to initialize state: %v", err)
+	}
+
+	// Try updates with wrong types
+	invalidUpdates := map[string]interface{}{
+		"buildStatus":    "invalid-status", // Should be BuildStatus type
+		"lastBuildTime":  "not-a-time",     // Should be time.Time
+		"buildCount":     "not-a-number",   // Should be int
+		"failureCount":   3.14,             // Should be int, not float
+		"buildDuration":  "5s",             // Should be time.Duration
+	}
+
+	err = sm.UpdateState("invalid-updates", invalidUpdates)
+	if err != nil {
+		t.Fatalf("UpdateState failed with invalid types: %v", err)
+	}
+
+	// Read state and verify invalid updates were stored in metadata
+	finalState, err := sm.ReadState("invalid-updates")
+	if err != nil {
+		t.Fatalf("Failed to read state after invalid updates: %v", err)
+	}
+
+	// Type-mismatched updates should be stored in metadata
+	if finalState.Metadata["buildStatus"] != "invalid-status" {
+		t.Error("Invalid buildStatus should be stored in metadata")
+	}
+
+	// Valid type updates should work normally
+	validUpdates := map[string]interface{}{
+		"buildCount":   100,
+		"failureCount": 5,
+	}
+
+	err = sm.UpdateState("invalid-updates", validUpdates)
+	if err != nil {
+		t.Fatalf("Valid updates failed: %v", err)
+	}
+
+	updatedState, err := sm.ReadState("invalid-updates")
+	if err != nil {
+		t.Fatalf("Failed to read state after valid updates: %v", err)
+	}
+
+	if updatedState.BuildCount != 100 {
+		t.Errorf("Build count not updated: expected 100, got %d", updatedState.BuildCount)
+	}
+}
+
+// Test memory usage and cleanup in long-running scenarios
+func TestStateManager_MemoryManagement(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	sm := state.NewStateManager(tempDir, log)
+
+	// Create and remove many states
+	numTargets := 1000
+	for i := 0; i < numTargets; i++ {
+		targetName := fmt.Sprintf("temp-target-%d", i)
+		target := &mockTarget{name: targetName}
+		
+		// Initialize
+		_, err := sm.InitializeState(target)
+		if err != nil {
+			t.Fatalf("Failed to initialize state %d: %v", i, err)
+		}
+
+		// Update multiple times
+		for j := 0; j < 10; j++ {
+			updates := map[string]interface{}{
+				"buildCount": j,
+			}
+			err = sm.UpdateState(targetName, updates)
+			if err != nil {
+				t.Fatalf("Failed to update state %d-%d: %v", i, j, err)
+			}
+		}
+
+		// Remove state
+		err = sm.RemoveState(targetName)
+		if err != nil {
+			t.Fatalf("Failed to remove state %d: %v", i, err)
+		}
+	}
+
+	// Verify no states remain
+	states, err := sm.DiscoverStates()
+	if err != nil {
+		t.Fatalf("Failed to discover states: %v", err)
+	}
+
+	if len(states) != 0 {
+		t.Errorf("Expected 0 states after cleanup, found %d", len(states))
+	}
+
+	// Verify state directory is clean
+	stateDir := filepath.Join(tempDir, ".poltergeist", "state")
+	files, err := os.ReadDir(stateDir)
+	if err != nil {
+		t.Fatalf("Failed to read state directory: %v", err)
+	}
+
+	if len(files) != 0 {
+		t.Errorf("Expected empty state directory, found %d files", len(files))
+	}
+}
+
+// Mock target for testing
+type mockTarget struct {
+	name string
+}
+
+func (m *mockTarget) GetName() string                 { return m.name }
+func (m *mockTarget) GetType() types.TargetType       { return types.TargetTypeExecutable }
+func (m *mockTarget) IsEnabled() bool                 { return true }
+func (m *mockTarget) GetBuildCommand() string         { return "build" }
+func (m *mockTarget) GetWatchPaths() []string         { return []string{"*"} }
+func (m *mockTarget) GetSettlingDelay() int           { return 100 }
+func (m *mockTarget) GetEnvironment() map[string]string { return nil }
+func (m *mockTarget) GetMaxRetries() int              { return 3 }
+func (m *mockTarget) GetBackoffMultiplier() float64   { return 2.0 }
+func (m *mockTarget) GetDebounceInterval() int        { return 100 }
+func (m *mockTarget) GetIcon() string                 { return "" }

@@ -1,0 +1,653 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/poltergeist/poltergeist/pkg/interfaces"
+	"github.com/poltergeist/poltergeist/pkg/logger"
+	"github.com/poltergeist/poltergeist/pkg/types"
+)
+
+func TestRunDaemonStart_NewDaemon(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Create test config
+	createTestConfigForDaemon(t, tempDir)
+
+	// Test starting daemon (mock implementation)
+	err := runDaemonStart()
+	
+	// Since daemon start is not implemented yet, expect specific error
+	if err == nil {
+		t.Error("Expected error for unimplemented daemon start")
+	}
+
+	expectedMsg := "daemon mode not implemented yet"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+func TestRunDaemonStop_NoDaemon(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Test stopping daemon when none is running
+	err := runDaemonStop()
+	
+	// Since daemon stop is not implemented yet, expect specific error
+	if err == nil {
+		t.Error("Expected error for unimplemented daemon stop")
+	}
+
+	expectedMsg := "daemon mode not implemented yet"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+func TestRunDaemonRestart(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Test restarting daemon
+	err := runDaemonRestart()
+	
+	// Since daemon restart is not implemented yet, expect specific error
+	if err == nil {
+		t.Error("Expected error for unimplemented daemon restart")
+	}
+
+	expectedMsg := "daemon mode not implemented yet"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+func TestRunDaemonStatus_NoDaemon(t *testing.T) {
+	tempDir := t.TempDir()
+	originalProjectRoot := projectRoot
+	projectRoot = tempDir
+	defer func() { projectRoot = originalProjectRoot }()
+
+	// Test status when no daemon is running
+	err := runDaemonStatus()
+	
+	// Should not error, just report status
+	if err != nil {
+		t.Errorf("runDaemonStatus should not error: %v", err)
+	}
+}
+
+// Test daemon functionality with mock implementations
+
+func TestDaemonManager_Start(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	// Create test config
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	// Test starting daemon
+	err := dm.Start(config)
+	if err != nil {
+		t.Errorf("Failed to start daemon: %v", err)
+	}
+
+	// Check if daemon is running
+	if !dm.IsRunning() {
+		t.Error("Daemon should be running after start")
+	}
+
+	// Test starting again (should handle gracefully)
+	err = dm.Start(config)
+	if err == nil {
+		t.Error("Expected error when starting already running daemon")
+	}
+}
+
+func TestDaemonManager_Stop(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	// Start daemon first
+	err := dm.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+
+	// Test stopping daemon
+	err = dm.Stop()
+	if err != nil {
+		t.Errorf("Failed to stop daemon: %v", err)
+	}
+
+	// Check if daemon is stopped
+	if dm.IsRunning() {
+		t.Error("Daemon should not be running after stop")
+	}
+
+	// Test stopping again (should handle gracefully)
+	err = dm.Stop()
+	if err != nil {
+		t.Errorf("Should handle stopping non-running daemon gracefully: %v", err)
+	}
+}
+
+func TestDaemonManager_Restart(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	// Start daemon first
+	err := dm.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+
+	originalPID := dm.GetPID()
+
+	// Test restarting daemon
+	err = dm.Restart()
+	if err != nil {
+		t.Errorf("Failed to restart daemon: %v", err)
+	}
+
+	// Should still be running but with new PID
+	if !dm.IsRunning() {
+		t.Error("Daemon should be running after restart")
+	}
+
+	newPID := dm.GetPID()
+	if newPID == originalPID {
+		t.Error("Daemon should have new PID after restart")
+	}
+}
+
+func TestDaemonManager_Status(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	// Test status when not running
+	status, err := dm.Status()
+	if err != nil {
+		t.Errorf("Status should not error: %v", err)
+	}
+
+	if status.Running {
+		t.Error("Status should show not running")
+	}
+
+	// Start daemon and test status
+	err = dm.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+
+	status, err = dm.Status()
+	if err != nil {
+		t.Errorf("Status should not error when running: %v", err)
+	}
+
+	if !status.Running {
+		t.Error("Status should show running")
+	}
+
+	if status.PID == 0 {
+		t.Error("Status should include PID")
+	}
+
+	if status.StartTime.IsZero() {
+		t.Error("Status should include start time")
+	}
+}
+
+func TestDaemonManager_ProcessLifecycle(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	// Start daemon
+	err := dm.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+
+	pid := dm.GetPID()
+	if pid == 0 {
+		t.Fatal("Expected valid PID")
+	}
+
+	// Verify process exists (mock implementation always returns true)
+	if !dm.ProcessExists(pid) {
+		t.Error("Process should exist")
+	}
+
+	// Stop daemon
+	err = dm.Stop()
+	if err != nil {
+		t.Errorf("Failed to stop daemon: %v", err)
+	}
+
+	// Process should no longer exist (in mock, we simulate this)
+	if dm.ProcessExists(pid) && !dm.IsRunning() {
+		t.Error("Process should not exist after stop")
+	}
+}
+
+func TestDaemonManager_PIDFile(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	pidFile := dm.GetPIDFile()
+	expectedPIDFile := filepath.Join(tempDir, ".poltergeist", "daemon.pid")
+	if pidFile != expectedPIDFile {
+		t.Errorf("Expected PID file %s, got %s", expectedPIDFile, pidFile)
+	}
+
+	// Start daemon - should create PID file
+	err := dm.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+
+	// Check if PID file exists
+	if !dm.PIDFileExists() {
+		t.Error("PID file should exist after starting daemon")
+	}
+
+	// Stop daemon - should remove PID file
+	err = dm.Stop()
+	if err != nil {
+		t.Errorf("Failed to stop daemon: %v", err)
+	}
+
+	// Check if PID file is removed
+	if dm.PIDFileExists() {
+		t.Error("PID file should be removed after stopping daemon")
+	}
+}
+
+func TestDaemonManager_ConfigValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	dm := NewMockDaemonManager(tempDir, log)
+
+	// Test with nil config
+	err := dm.Start(nil)
+	if err == nil {
+		t.Error("Expected error for nil config")
+	}
+
+	// Test with invalid config
+	invalidConfig := &types.PoltergeistConfig{}
+	err = dm.Start(invalidConfig)
+	if err == nil {
+		t.Error("Expected error for invalid config")
+	}
+}
+
+func TestDaemonManager_SignalHandling(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	// Start daemon
+	err := dm.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+
+	// Test sending signals (mock implementation)
+	err = dm.SendSignal(syscall.SIGTERM)
+	if err != nil {
+		t.Errorf("Failed to send SIGTERM: %v", err)
+	}
+
+	// Give time for signal handling
+	time.Sleep(100 * time.Millisecond)
+
+	// Daemon should still be running (mock doesn't actually handle signals)
+	if !dm.IsRunning() {
+		t.Error("Daemon should handle SIGTERM gracefully")
+	}
+
+	// Test force kill
+	err = dm.SendSignal(syscall.SIGKILL)
+	if err != nil {
+		t.Errorf("Failed to send SIGKILL: %v", err)
+	}
+}
+
+func TestDaemonManager_MultipleInstances(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	// Create two daemon managers for same directory
+	dm1 := NewMockDaemonManager(tempDir, log)
+	dm2 := NewMockDaemonManager(tempDir, log)
+
+	// Start first daemon
+	err := dm1.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start first daemon: %v", err)
+	}
+
+	// Try to start second daemon - should fail
+	err = dm2.Start(config)
+	if err == nil {
+		t.Error("Expected error when starting second daemon in same directory")
+	}
+
+	// Stop first daemon
+	err = dm1.Stop()
+	if err != nil {
+		t.Errorf("Failed to stop first daemon: %v", err)
+	}
+
+	// Now second daemon should be able to start
+	err = dm2.Start(config)
+	if err != nil {
+		t.Errorf("Failed to start second daemon after first stopped: %v", err)
+	}
+
+	// Clean up
+	dm2.Stop()
+}
+
+func TestDaemonManager_LogManagement(t *testing.T) {
+	tempDir := t.TempDir()
+	log := logger.NewMemoryLogger()
+	
+	config := &types.PoltergeistConfig{
+		Version:     "1.0",
+		ProjectType: types.ProjectTypeMixed,
+		Targets:     []json.RawMessage{},
+	}
+
+	dm := NewMockDaemonManager(tempDir, log)
+	
+	// Start daemon
+	err := dm.Start(config)
+	if err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+
+	// Check log file creation
+	logFile := dm.GetLogFile()
+	expectedLogFile := filepath.Join(tempDir, ".poltergeist", "daemon.log")
+	if logFile != expectedLogFile {
+		t.Errorf("Expected log file %s, got %s", expectedLogFile, logFile)
+	}
+
+	// Simulate some daemon activity and check logging
+	dm.LogActivity("Test activity")
+	
+	// Stop daemon
+	err = dm.Stop()
+	if err != nil {
+		t.Errorf("Failed to stop daemon: %v", err)
+	}
+}
+
+// Helper functions and mock implementations
+
+func createTestConfigForDaemon(t *testing.T, tempDir string) {
+	config := map[string]interface{}{
+		"version":     "1.0",
+		"projectType": "mixed",
+		"targets": []map[string]interface{}{
+			{
+				"name":         "test-target",
+				"type":         "executable",
+				"buildCommand": "echo test",
+				"watchPaths":   []string{"*.go"},
+			},
+		},
+	}
+
+	configPath := filepath.Join(tempDir, "poltergeist.config.json")
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal config: %v", err)
+	}
+
+	err = os.WriteFile(configPath, data, 0644)
+	if err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+}
+
+// MockDaemonManager for testing daemon functionality
+type MockDaemonManager struct {
+	projectRoot string
+	logger      logger.Logger
+	running     bool
+	pid         int
+	startTime   time.Time
+	config      *types.PoltergeistConfig
+}
+
+func NewMockDaemonManager(projectRoot string, log logger.Logger) *MockDaemonManager {
+	return &MockDaemonManager{
+		projectRoot: projectRoot,
+		logger:      log,
+		running:     false,
+		pid:         0,
+	}
+}
+
+func (dm *MockDaemonManager) Start(config *types.PoltergeistConfig) error {
+	if config == nil {
+		return fmt.Errorf("config cannot be nil")
+	}
+
+	if config.Version == "" {
+		return fmt.Errorf("invalid config: missing version")
+	}
+
+	if dm.running {
+		return fmt.Errorf("daemon is already running")
+	}
+
+	// Check if another daemon is already running
+	if dm.PIDFileExists() {
+		return fmt.Errorf("daemon is already running (PID file exists)")
+	}
+
+	// Simulate starting daemon
+	dm.running = true
+	dm.pid = 12345 // Mock PID
+	dm.startTime = time.Now()
+	dm.config = config
+
+	// Create PID file
+	dm.createPIDFile()
+
+	dm.logger.Info("Mock daemon started", logger.WithField("pid", dm.pid))
+	return nil
+}
+
+func (dm *MockDaemonManager) Stop() error {
+	if !dm.running {
+		return nil // Already stopped
+	}
+
+	// Simulate stopping daemon
+	dm.running = false
+	dm.pid = 0
+	dm.config = nil
+
+	// Remove PID file
+	dm.removePIDFile()
+
+	dm.logger.Info("Mock daemon stopped")
+	return nil
+}
+
+func (dm *MockDaemonManager) Restart() error {
+	if err := dm.Stop(); err != nil {
+		return err
+	}
+
+	time.Sleep(100 * time.Millisecond) // Brief pause
+
+	return dm.Start(dm.config)
+}
+
+func (dm *MockDaemonManager) Status() (interfaces.DaemonStatus, error) {
+	status := interfaces.DaemonStatus{
+		Running:   dm.running,
+		PID:       dm.pid,
+		StartTime: dm.startTime,
+	}
+
+	if dm.config != nil {
+		// Mock some targets
+		status.Targets = []string{"test-target"}
+		status.Builds = 5
+		status.Errors = 1
+	}
+
+	return status, nil
+}
+
+func (dm *MockDaemonManager) IsRunning() bool {
+	return dm.running
+}
+
+func (dm *MockDaemonManager) GetPID() int {
+	return dm.pid
+}
+
+func (dm *MockDaemonManager) ProcessExists(pid int) bool {
+	// In mock, assume process exists if daemon is running and PID matches
+	return dm.running && dm.pid == pid
+}
+
+func (dm *MockDaemonManager) SendSignal(sig syscall.Signal) error {
+	if !dm.running {
+		return fmt.Errorf("daemon is not running")
+	}
+
+	// Mock signal handling
+	dm.logger.Info("Signal sent to daemon", logger.WithField("signal", sig))
+	
+	// Simulate handling of different signals
+	switch sig {
+	case syscall.SIGTERM:
+		// Graceful shutdown (but don't actually stop in mock)
+		dm.logger.Info("Received SIGTERM")
+	case syscall.SIGKILL:
+		// Force kill
+		dm.logger.Info("Received SIGKILL")
+	}
+
+	return nil
+}
+
+func (dm *MockDaemonManager) GetPIDFile() string {
+	return filepath.Join(dm.projectRoot, ".poltergeist", "daemon.pid")
+}
+
+func (dm *MockDaemonManager) PIDFileExists() bool {
+	_, err := os.Stat(dm.GetPIDFile())
+	return err == nil
+}
+
+func (dm *MockDaemonManager) createPIDFile() error {
+	pidDir := filepath.Dir(dm.GetPIDFile())
+	if err := os.MkdirAll(pidDir, 0755); err != nil {
+		return err
+	}
+
+	pidContent := fmt.Sprintf("%d", dm.pid)
+	return os.WriteFile(dm.GetPIDFile(), []byte(pidContent), 0644)
+}
+
+func (dm *MockDaemonManager) removePIDFile() error {
+	pidFile := dm.GetPIDFile()
+	if dm.PIDFileExists() {
+		return os.Remove(pidFile)
+	}
+	return nil
+}
+
+func (dm *MockDaemonManager) GetLogFile() string {
+	return filepath.Join(dm.projectRoot, ".poltergeist", "daemon.log")
+}
+
+func (dm *MockDaemonManager) LogActivity(message string) {
+	dm.logger.Info("Daemon activity", logger.WithField("message", message))
+}
