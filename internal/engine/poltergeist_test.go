@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -280,7 +281,7 @@ func createTestConfig() *types.PoltergeistConfig {
 	return &types.PoltergeistConfig{
 		Version:     "1.0",
 		ProjectType: "test",
-		Targets:     []types.RawTarget{},
+		Targets:     []json.RawMessage{},
 	}
 }
 
@@ -309,7 +310,7 @@ func (m *mockWatchmanConfigManager) SuggestOptimizations() ([]string, error) {
 	return nil, nil
 }
 
-func (m *mockWatchmanConfigManager) CreateExclusionExpressions(config *types.PoltergeistConfig) []interface{} {
+func (m *mockWatchmanConfigManager) CreateExclusionExpressions(config *types.PoltergeistConfig) []interfaces.ExclusionExpression {
 	return nil
 }
 
