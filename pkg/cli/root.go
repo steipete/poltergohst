@@ -27,7 +27,7 @@ var rootCmd = &cobra.Command{
 Poltergeist watches your project files and automatically rebuilds targets when
 changes are detected. It's like having a helpful ghost that builds your code
 before you even ask!`,
-	
+
 	Run: func(cmd *cobra.Command, args []string) {
 		// Check if version flag is set
 		if v, _ := cmd.Flags().GetBool("version"); v {
@@ -42,10 +42,10 @@ before you even ask!`,
 // Execute runs the CLI
 func Execute(v string) error {
 	version = v
-	
+
 	// Initialize the root command explicitly (avoiding init())
 	initializeRootCommand()
-	
+
 	return rootCmd.Execute()
 }
 
@@ -59,10 +59,10 @@ func initializeRootCommand() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: poltergeist.config.json)")
 	rootCmd.PersistentFlags().StringVar(&projectRoot, "root", ".", "project root directory")
 	rootCmd.PersistentFlags().StringVarP(&verbosity, "verbosity", "v", "info", "log level (debug, info, warn, error)")
-	
+
 	// Add version flag
 	rootCmd.Flags().Bool("version", false, "Print version information and quit")
-	
+
 	// Add subcommands
 	rootCmd.AddCommand(newWatchCmd())
 	rootCmd.AddCommand(newInitCmd())
@@ -85,7 +85,7 @@ func initConfig() {
 		viper.AddConfigPath(projectRoot)
 		viper.SetConfigName("poltergeist.config")
 		viper.SetConfigType("json")
-		
+
 		// Also try YAML
 		viper.SetConfigName("poltergeist.config")
 		viper.SetConfigType("yaml")

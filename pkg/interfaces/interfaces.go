@@ -24,6 +24,7 @@ type WatchmanClient interface {
 	) error
 	Unsubscribe(subscriptionName string) error
 	IsConnected() bool
+	StartEventReceiver() // Start receiving events after setup is complete
 }
 
 // SubscriptionConfig represents watchman subscription configuration
@@ -44,7 +45,7 @@ type FileChange struct {
 
 // ExclusionExpression represents a watchman exclusion pattern
 type ExclusionExpression struct {
-	Type    string
+	Type     string
 	Patterns []string
 }
 

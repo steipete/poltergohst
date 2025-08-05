@@ -420,7 +420,7 @@ func BenchmarkIntelligentOrdering_LargeQueue(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		q.OnFileChanged([]string{"file.go"}, targets)
-		
+
 		// Dequeue all
 		for j := 0; j < 1000; j++ {
 			q.Dequeue()
@@ -450,9 +450,10 @@ func (e *dynamicPriorityEngine) setPriority(targetName string, priority float64)
 	e.priorities[targetName] = priority
 }
 
-func (e *dynamicPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {}
-func (e *dynamicPriorityEngine) GetTargetPriority(target string) *types.TargetPriority      { return nil }
-func (e *dynamicPriorityEngine) RecordFileChange(file string, targets []string)            {}
+func (e *dynamicPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {
+}
+func (e *dynamicPriorityEngine) GetTargetPriority(target string) *types.TargetPriority { return nil }
+func (e *dynamicPriorityEngine) RecordFileChange(file string, targets []string)        {}
 
 type timeBasedPriorityEngine struct {
 	lastChanges map[string]time.Time
@@ -462,21 +463,22 @@ type timeBasedPriorityEngine struct {
 func (e *timeBasedPriorityEngine) CalculatePriority(target types.Target, files []string) float64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	if e.lastChanges == nil {
 		e.lastChanges = make(map[string]time.Time)
 	}
-	
+
 	now := time.Now()
 	e.lastChanges[target.GetName()] = now
-	
+
 	// More recent changes get higher priority
 	return float64(now.Unix())
 }
 
-func (e *timeBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {}
-func (e *timeBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority      { return nil }
-func (e *timeBasedPriorityEngine) RecordFileChange(file string, targets []string)            {}
+func (e *timeBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {
+}
+func (e *timeBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority { return nil }
+func (e *timeBasedPriorityEngine) RecordFileChange(file string, targets []string)        {}
 
 type frequencyBasedPriorityEngine struct {
 	changeCount map[string]int
@@ -486,17 +488,20 @@ type frequencyBasedPriorityEngine struct {
 func (e *frequencyBasedPriorityEngine) CalculatePriority(target types.Target, files []string) float64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	count := e.changeCount[target.GetName()]
 	e.changeCount[target.GetName()] = count + 1
-	
+
 	// Higher frequency = higher priority
 	return float64(count * 10)
 }
 
-func (e *frequencyBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {}
-func (e *frequencyBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority      { return nil }
-func (e *frequencyBasedPriorityEngine) RecordFileChange(file string, targets []string)            {}
+func (e *frequencyBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {
+}
+func (e *frequencyBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority {
+	return nil
+}
+func (e *frequencyBasedPriorityEngine) RecordFileChange(file string, targets []string) {}
 
 type successRateBasedPriorityEngine struct {
 	successRates map[string]float64
@@ -509,9 +514,12 @@ func (e *successRateBasedPriorityEngine) CalculatePriority(target types.Target, 
 	return 50.0
 }
 
-func (e *successRateBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {}
-func (e *successRateBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority      { return nil }
-func (e *successRateBasedPriorityEngine) RecordFileChange(file string, targets []string)            {}
+func (e *successRateBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {
+}
+func (e *successRateBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority {
+	return nil
+}
+func (e *successRateBasedPriorityEngine) RecordFileChange(file string, targets []string) {}
 
 type buildTimeBasedPriorityEngine struct {
 	buildTimes map[string]time.Duration
@@ -525,9 +533,12 @@ func (e *buildTimeBasedPriorityEngine) CalculatePriority(target types.Target, fi
 	return 50.0
 }
 
-func (e *buildTimeBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {}
-func (e *buildTimeBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority      { return nil }
-func (e *buildTimeBasedPriorityEngine) RecordFileChange(file string, targets []string)            {}
+func (e *buildTimeBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {
+}
+func (e *buildTimeBasedPriorityEngine) GetTargetPriority(target string) *types.TargetPriority {
+	return nil
+}
+func (e *buildTimeBasedPriorityEngine) RecordFileChange(file string, targets []string) {}
 
 type benchmarkPriorityEngine struct{}
 
@@ -541,9 +552,10 @@ func (e *benchmarkPriorityEngine) CalculatePriority(target types.Target, files [
 	return priority
 }
 
-func (e *benchmarkPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {}
-func (e *benchmarkPriorityEngine) GetTargetPriority(target string) *types.TargetPriority      { return nil }
-func (e *benchmarkPriorityEngine) RecordFileChange(file string, targets []string)            {}
+func (e *benchmarkPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {
+}
+func (e *benchmarkPriorityEngine) GetTargetPriority(target string) *types.TargetPriority { return nil }
+func (e *benchmarkPriorityEngine) RecordFileChange(file string, targets []string)        {}
 
 type concurrentNotifier struct {
 	mu           sync.Mutex

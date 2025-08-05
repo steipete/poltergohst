@@ -17,10 +17,10 @@ import (
 func main() {
 	// Create logger
 	log := logger.CreateLogger("", "info")
-	
+
 	// Determine which implementation to use
 	useWatchman := checkWatchmanAvailable()
-	
+
 	if useWatchman {
 		log.Info("Using Watchman for file watching")
 		runWatchmanExample(log)
@@ -37,7 +37,7 @@ func checkWatchmanAvailable() bool {
 		return false
 	}
 	defer conn.Close()
-	
+
 	// Try to get version
 	_, err = conn.Version()
 	return err == nil
@@ -52,7 +52,7 @@ func runWatchmanExample(log logger.Logger) {
 		return
 	}
 	defer conn.Close()
-	
+
 	// Get Watchman version
 	version, err := conn.Version()
 	if err != nil {
@@ -60,29 +60,29 @@ func runWatchmanExample(log logger.Logger) {
 	} else {
 		log.Info(fmt.Sprintf("Connected to Watchman version: %s", version))
 	}
-	
+
 	// Watch current directory
 	cwd, _ := os.Getwd()
 	projectPath := cwd
-	
+
 	// Watch the project
 	resp, err := conn.WatchProject(projectPath)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to watch project: %v", err))
 		return
 	}
-	
+
 	log.Info(fmt.Sprintf("Watching project: %s", resp.Watch))
 	if resp.RelativeRoot != "" {
 		log.Info(fmt.Sprintf("Relative root: %s", resp.RelativeRoot))
 	}
-	
+
 	// Get initial clock
 	clock, err := conn.Clock(resp.Watch)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to get clock: %v", err))
 	}
-	
+
 	// Create subscription for Go files
 	subscriptionName := "go-files"
 	query := watchman.SubscriptionQuery{
@@ -100,20 +100,20 @@ func runWatchmanExample(log logger.Logger) {
 		Since:  clock,
 		Empty:  true,
 	}
-	
+
 	// Subscribe to changes
 	_, err = conn.Subscribe(resp.Watch, subscriptionName, query)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to subscribe: %v", err))
 		return
 	}
-	
+
 	log.Info(fmt.Sprintf("Created subscription: %s", subscriptionName))
-	
+
 	// Process events in a goroutine
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	go func() {
 		for {
 			select {
@@ -126,7 +126,7 @@ func runWatchmanExample(log logger.Logger) {
 					log.Error(fmt.Sprintf("Error receiving event: %v", err))
 					continue
 				}
-				
+
 				// Check if it's a subscription notification
 				if event.Subscription == subscriptionName {
 					log.Info(fmt.Sprintf("Files changed in %s:", event.Root))
@@ -138,16 +138,16 @@ func runWatchmanExample(log logger.Logger) {
 			}
 		}
 	}()
-	
+
 	// Example: Perform a one-time query
 	performQuery(conn, resp.Watch, log)
-	
+
 	// Example: Create a trigger
 	createTriggerExample(conn, resp.Watch, log)
-	
+
 	// Wait for interrupt
 	waitForInterrupt(log)
-	
+
 	// Clean up
 	conn.Unsubscribe(resp.Watch, subscriptionName)
 }
@@ -161,39 +161,39 @@ func runFSNotifyExample(log logger.Logger) {
 		return
 	}
 	defer watcher.Close()
-	
+
 	// Configure watcher
 	watcher.SetPatterns([]string{
 		"*.go",
 		"go.mod",
 		"go.sum",
 	})
-	
+
 	watcher.SetExclusions([]string{
 		"vendor",
 		".git",
 		"_test.go",
 	})
-	
+
 	watcher.SetSettlingDelay(200 * time.Millisecond)
-	
+
 	// Watch current directory
 	cwd, _ := os.Getwd()
-	
+
 	// Define callback for file events
 	callback := func(event watchman.FileEvent) {
 		logFileEvent(log, event)
 	}
-	
+
 	// Start watching
 	err = watcher.WatchProject(cwd, callback)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to watch project: %v", err))
 		return
 	}
-	
+
 	log.Info(fmt.Sprintf("Watching project with fsnotify: %s", cwd))
-	
+
 	// Wait for interrupt
 	waitForInterrupt(log)
 }
@@ -205,13 +205,13 @@ func performQuery(conn *watchman.WatchmanConnection, root string, log logger.Log
 		Expression: watchman.MatchExpression("*.go", false),
 		Fields:     []string{"name", "size", "mtime_ms"},
 	}
-	
+
 	resp, err := conn.Query(root, query)
 	if err != nil {
 		log.Error(fmt.Sprintf("Query failed: %v", err))
 		return
 	}
-	
+
 	log.Info(fmt.Sprintf("Found %d Go files:", len(resp.Files)))
 	for _, file := range resp.Files {
 		log.Debug(fmt.Sprintf("  %s (size: %d bytes)", file.Name, file.Size))
@@ -222,21 +222,21 @@ func performQuery(conn *watchman.WatchmanConnection, root string, log logger.Log
 func createTriggerExample(conn *watchman.WatchmanConnection, root string, log logger.Logger) {
 	// Create a trigger that runs when Go files change
 	triggerName := "go-build-trigger"
-	
+
 	query := watchman.Query{
 		Expression: watchman.MatchExpression("*.go", false),
 	}
-	
+
 	command := []string{"echo", "Go files changed, would rebuild..."}
-	
+
 	err := conn.Trigger(root, triggerName, query, command)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to create trigger: %v", err))
 		return
 	}
-	
+
 	log.Info(fmt.Sprintf("Created trigger: %s", triggerName))
-	
+
 	// List triggers
 	_, err = conn.TriggerList(root)
 	if err != nil {
@@ -244,7 +244,7 @@ func createTriggerExample(conn *watchman.WatchmanConnection, root string, log lo
 	} else {
 		log.Debug("Active triggers listed successfully")
 	}
-	
+
 	// Clean up trigger on exit
 	defer func() {
 		if err := conn.TriggerDel(root, triggerName); err != nil {
@@ -266,9 +266,9 @@ func logFileEvent(log logger.Logger, event watchman.FileEvent) {
 	case watchman.FileRenamed:
 		eventType = "RENAMED"
 	}
-	
+
 	relPath, _ := filepath.Rel(".", event.Path)
-	
+
 	if event.IsDir {
 		log.Info(fmt.Sprintf("[%s] Directory: %s", eventType, relPath))
 	} else {
@@ -280,14 +280,14 @@ func logFileEvent(log logger.Logger, event watchman.FileEvent) {
 func waitForInterrupt(log logger.Logger) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	
+
 	log.Info("Watching for file changes... Press Ctrl+C to stop")
 	<-sigChan
 	log.Info("Shutting down...")
 }
 
 // Example usage instructions:
-// 
+//
 // 1. Build and run:
 //    go build -o watchman-example examples/watchman_example.go
 //    ./watchman-example

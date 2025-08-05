@@ -20,7 +20,7 @@ import (
 const (
 	// Unix socket paths
 	unixSockPathTemplate = "%s/%s-state/sock"
-	
+
 	// Windows named pipe
 	windowsPipeTemplate = "\\\\.\\pipe\\watchman-%s"
 )
@@ -36,19 +36,19 @@ type WatchmanCommand []interface{}
 
 // WatchmanResponse represents a response from Watchman
 type WatchmanResponse struct {
-	Version         string                 `json:"version,omitempty"`
-	Error           string                 `json:"error,omitempty"`
-	Warning         string                 `json:"warning,omitempty"`
-	Clock           string                 `json:"clock,omitempty"`
-	IsFreshInstance bool                   `json:"is_fresh_instance,omitempty"`
-	Files           []WatchmanFile         `json:"-"` // Custom unmarshal
-	FilesRaw        json.RawMessage        `json:"files,omitempty"` // Raw for flexible parsing
-	Root            string                 `json:"root,omitempty"`
-	Subscription    string                 `json:"subscription,omitempty"`
-	Unilateral      bool                   `json:"unilateral,omitempty"`
-	Log             string                 `json:"log,omitempty"`
-	Watch           string                 `json:"watch,omitempty"`
-	RelativeRoot    string                 `json:"relative_path,omitempty"`
+	Version         string          `json:"version,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	Warning         string          `json:"warning,omitempty"`
+	Clock           string          `json:"clock,omitempty"`
+	IsFreshInstance bool            `json:"is_fresh_instance,omitempty"`
+	Files           []WatchmanFile  `json:"-"`               // Custom unmarshal
+	FilesRaw        json.RawMessage `json:"files,omitempty"` // Raw for flexible parsing
+	Root            string          `json:"root,omitempty"`
+	Subscription    string          `json:"subscription,omitempty"`
+	Unilateral      bool            `json:"unilateral,omitempty"`
+	Log             string          `json:"log,omitempty"`
+	Watch           string          `json:"watch,omitempty"`
+	RelativeRoot    string          `json:"relative_path,omitempty"`
 }
 
 // UnmarshalJSON custom unmarshaler for WatchmanResponse
@@ -59,11 +59,11 @@ func (wr *WatchmanResponse) UnmarshalJSON(data []byte) error {
 	}{
 		Alias: (*Alias)(wr),
 	}
-	
+
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	
+
 	// Parse files if present
 	if len(wr.FilesRaw) > 0 {
 		// Try to parse as array of file objects
@@ -81,22 +81,22 @@ func (wr *WatchmanResponse) UnmarshalJSON(data []byte) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 // WatchmanFile represents file information from Watchman
 type WatchmanFile struct {
-	Name     string      `json:"name"`
-	Size     int64       `json:"size,omitempty"`
-	Mode     int32       `json:"mode,omitempty"`
-	UID      int         `json:"uid,omitempty"`
-	GID      int         `json:"gid,omitempty"`
-	MTimeMs  int64       `json:"mtime_ms,omitempty"`
-	CTimeMs  int64       `json:"ctime_ms,omitempty"`
-	Exists   bool        `json:"exists"`
-	Type     string      `json:"type,omitempty"` // 'f' for file, 'd' for directory, 'l' for symlink
-	New      bool        `json:"new,omitempty"`
+	Name    string `json:"name"`
+	Size    int64  `json:"size,omitempty"`
+	Mode    int32  `json:"mode,omitempty"`
+	UID     int    `json:"uid,omitempty"`
+	GID     int    `json:"gid,omitempty"`
+	MTimeMs int64  `json:"mtime_ms,omitempty"`
+	CTimeMs int64  `json:"ctime_ms,omitempty"`
+	Exists  bool   `json:"exists"`
+	Type    string `json:"type,omitempty"` // 'f' for file, 'd' for directory, 'l' for symlink
+	New     bool   `json:"new,omitempty"`
 }
 
 // Expression types for Watchman queries
@@ -157,22 +157,22 @@ func Connect() (*WatchmanConnection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to find watchman socket: %w", err)
 	}
-	
+
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to watchman: %w", err)
 	}
-	
+
 	wc := &WatchmanConnection{
 		conn:     conn,
 		reader:   bufio.NewReader(conn),
 		writer:   bufio.NewWriter(conn),
 		sockPath: sockPath,
 	}
-	
+
 	// Watchman doesn't send anything initially - it waits for commands
 	// We'll just return the connection ready to use
-	
+
 	return wc, nil
 }
 
@@ -187,7 +187,10 @@ func (wc *WatchmanConnection) Send(cmd WatchmanCommand) error {
 	if err != nil {
 		return err
 	}
-	
+
+	// Debug: log what we're sending
+	// fmt.Printf("DEBUG: Sending to Watchman: %s\n", string(data))
+
 	// Write the JSON data followed by newline
 	if _, err := wc.writer.Write(data); err != nil {
 		return err
@@ -195,26 +198,30 @@ func (wc *WatchmanConnection) Send(cmd WatchmanCommand) error {
 	if err := wc.writer.WriteByte('\n'); err != nil {
 		return err
 	}
-	
+
 	return wc.writer.Flush()
 }
 
 // Receive receives a response from Watchman
 func (wc *WatchmanConnection) Receive() (*WatchmanResponse, error) {
+	// fmt.Printf("DEBUG: Waiting for response from Watchman...\n")
 	line, err := wc.reader.ReadBytes('\n')
 	if err != nil {
+		// fmt.Printf("DEBUG: Error reading from Watchman: %v\n", err)
 		return nil, err
 	}
-	
+	// fmt.Printf("DEBUG: Received from Watchman: %s", string(line))
+
 	var resp WatchmanResponse
 	if err := json.Unmarshal(line, &resp); err != nil {
+		// fmt.Printf("DEBUG: Error unmarshaling response: %v\n", err)
 		return nil, err
 	}
-	
+
 	if resp.Error != "" {
 		return &resp, fmt.Errorf("watchman error: %s", resp.Error)
 	}
-	
+
 	return &resp, nil
 }
 
@@ -236,7 +243,7 @@ func (wc *WatchmanConnection) readInitialPDU() error {
 		wc.reader = bufio.NewReader(io.MultiReader(bytes.NewReader(header[:]), wc.conn))
 		return nil
 	}
-	
+
 	// Check for PDU magic
 	if bytes.Equal(header[:4], []byte{0x00, 0x01, 0x05, 0x00}) {
 		// Binary PDU protocol
@@ -249,7 +256,7 @@ func (wc *WatchmanConnection) readInitialPDU() error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -266,12 +273,12 @@ func getWatchmanSocket() (string, error) {
 			return result.Sockname, nil
 		}
 	}
-	
+
 	// Fall back to default locations
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf(windowsPipeTemplate, os.Getenv("USERNAME")), nil
 	}
-	
+
 	// Unix-like systems
 	stateDir := os.Getenv("WATCHMAN_STATE_DIR")
 	if stateDir == "" {
@@ -281,34 +288,34 @@ func getWatchmanSocket() (string, error) {
 			stateDir = filepath.Join(os.TempDir(), ".watchman")
 		}
 	}
-	
+
 	user := os.Getenv("USER")
 	if user == "" {
 		user = os.Getenv("USERNAME")
 	}
-	
+
 	sockPath := fmt.Sprintf(unixSockPathTemplate, stateDir, user)
 	return sockPath, nil
 }
 
 // Query represents a Watchman query
 type Query struct {
-	Expression Expression     `json:"expression,omitempty"`
-	Fields     []string       `json:"fields,omitempty"`
-	Since      string         `json:"since,omitempty"`
-	Suffix     []string       `json:"suffix,omitempty"`
-	RelativeRoot string       `json:"relative_root,omitempty"`
+	Expression   Expression `json:"expression,omitempty"`
+	Fields       []string   `json:"fields,omitempty"`
+	Since        string     `json:"since,omitempty"`
+	Suffix       []string   `json:"suffix,omitempty"`
+	RelativeRoot string     `json:"relative_root,omitempty"`
 }
 
 // SubscriptionQuery represents a subscription configuration
 type SubscriptionQuery struct {
-	Expression   Expression     `json:"expression,omitempty"`
-	Fields       []string       `json:"fields,omitempty"`
-	Since        string         `json:"since,omitempty"`
-	DeferVCS     bool          `json:"defer_vcs,omitempty"`
-	Drop         []string       `json:"drop,omitempty"`
-	RelativeRoot string         `json:"relative_root,omitempty"`
-	Empty        bool          `json:"empty_on_fresh_instance,omitempty"`
+	Expression   Expression `json:"expression,omitempty"`
+	Fields       []string   `json:"fields,omitempty"`
+	Since        string     `json:"since,omitempty"`
+	DeferVCS     bool       `json:"defer_vcs,omitempty"`
+	Drop         []string   `json:"drop,omitempty"`
+	RelativeRoot string     `json:"relative_root,omitempty"`
+	Empty        bool       `json:"empty_on_fresh_instance,omitempty"`
 }
 
 // WatchProject watches a project directory
@@ -381,7 +388,7 @@ func (wc *WatchmanConnection) GetConfig(root string) (map[string]interface{}, er
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Parse config from response
 	// This would need proper unmarshaling based on actual response structure
 	config := make(map[string]interface{})
@@ -402,12 +409,12 @@ func (wc *WatchmanConnection) Shutdown() error {
 
 // FileEvent represents a file change event
 type FileEvent struct {
-	Path      string
-	Type      EventType
-	IsDir     bool
-	Size      int64
-	Mode      os.FileMode
-	ModTime   time.Time
+	Path    string
+	Type    EventType
+	IsDir   bool
+	Size    int64
+	Mode    os.FileMode
+	ModTime time.Time
 }
 
 // EventType represents the type of file event
@@ -428,7 +435,7 @@ func ConvertWatchmanFile(root string, wf WatchmanFile) FileEvent {
 		Size:    wf.Size,
 		ModTime: time.Unix(0, wf.MTimeMs*int64(time.Millisecond)),
 	}
-	
+
 	// Determine event type
 	if !wf.Exists {
 		event.Type = FileDeleted
@@ -437,11 +444,11 @@ func ConvertWatchmanFile(root string, wf WatchmanFile) FileEvent {
 	} else {
 		event.Type = FileModified
 	}
-	
+
 	// Convert mode
 	if wf.Mode != 0 {
 		event.Mode = os.FileMode(wf.Mode)
 	}
-	
+
 	return event
 }

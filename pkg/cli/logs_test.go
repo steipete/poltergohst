@@ -68,7 +68,7 @@ func TestRunLogs_LimitLines(t *testing.T) {
 	tempDir := t.TempDir()
 	originalProjectRoot := projectRoot
 	projectRoot = tempDir
-	defer func() { projectRoot = originalProjectRoot }() 
+	defer func() { projectRoot = originalProjectRoot }()
 
 	// Create log directory with more entries
 	manyEntries := make([]LogEntry, 100)
@@ -193,10 +193,10 @@ func TestParseLogEntry_ValidFormats(t *testing.T) {
 func TestParseLogEntry_InvalidFormats(t *testing.T) {
 	invalidLines := []string{
 		"Invalid log line",
-		"2023-12-01T10:30:45Z", // Too few fields
+		"2023-12-01T10:30:45Z",                 // Too few fields
 		"Not a timestamp INFO target1 message", // Invalid timestamp
-		"", // Empty line
-		"   ", // Whitespace only
+		"",                                     // Empty line
+		"   ",                                  // Whitespace only
 	}
 
 	for _, line := range invalidLines {
@@ -324,7 +324,7 @@ func TestFormatLogEntry(t *testing.T) {
 	}
 
 	formatted := formatLogEntry(entry)
-	
+
 	// Should contain all components
 	if !strings.Contains(formatted, "INFO") {
 		t.Error("Formatted entry should contain level")
@@ -342,7 +342,7 @@ func TestFormatLogEntry(t *testing.T) {
 
 func TestReadLogFile_ValidFile(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	// Create test log file
 	logFile := filepath.Join(tempDir, "test.log")
 	content := `2023-12-01T10:30:45Z INFO target1 Build started
@@ -377,7 +377,7 @@ func TestReadLogFile_ValidFile(t *testing.T) {
 
 func TestReadLogFile_EmptyFile(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	// Create empty log file
 	logFile := filepath.Join(tempDir, "empty.log")
 	err := os.WriteFile(logFile, []byte(""), 0644)

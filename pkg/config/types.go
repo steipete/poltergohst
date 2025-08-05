@@ -1,5 +1,5 @@
-// Package types provides core types and configurations for Poltergeist
-package types
+// Package config provides core types and configurations for Poltergeist
+package config
 
 import (
 	"encoding/json"

@@ -15,12 +15,12 @@ import (
 // TestPoltergeistStartWithContext tests the StartWithContext method with various scenarios
 func TestPoltergeistStartWithContext(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupMocks     func() interfaces.PoltergeistDependencies
-		targetName     string
-		expectError    bool
-		errorContains  string
-		checkRunning   bool
+		name          string
+		setupMocks    func() interfaces.PoltergeistDependencies
+		targetName    string
+		expectError   bool
+		errorContains string
+		checkRunning  bool
 	}{
 		{
 			name: "successful start with all dependencies",
@@ -74,7 +74,7 @@ func TestPoltergeistStartWithContext(t *testing.T) {
 			config := createTestConfig()
 			deps := tt.setupMocks()
 			log := logger.CreateLoggerWithOutput("", "debug", nil)
-			
+
 			p := New(config, "/test/project", log, deps, "test.json")
 
 			// Special case: test already running error
@@ -101,11 +101,11 @@ func TestPoltergeistStartWithContext(t *testing.T) {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
 				}
-				
+
 				if tt.checkRunning && !p.isRunning {
 					t.Error("Expected Poltergeist to be running")
 				}
-				
+
 				// Clean up
 				p.Stop()
 			}
@@ -167,7 +167,7 @@ func TestSafeGroupPanicRecovery(t *testing.T) {
 			// Setup
 			ctx := context.Background()
 			log := logger.CreateLoggerWithOutput("", "debug", nil)
-			
+
 			g, ctx := NewSafeGroup(ctx, log)
 			g.SetLimit(2) // Limit concurrency
 
@@ -294,8 +294,8 @@ func createValidDependencies() interfaces.PoltergeistDependencies {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr || 
-		   len(s) > len(substr) && contains(s[1:], substr)
+	return len(s) >= len(substr) && s[:len(substr)] == substr ||
+		len(s) > len(substr) && contains(s[1:], substr)
 }
 
 // mockWatchmanConfigManager is a minimal mock for WatchmanConfigManager

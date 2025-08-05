@@ -14,10 +14,10 @@ import (
 
 func TestDaemon_StartStop(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test config file with a valid target
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	// Create a test target with enabled file watching
 	target := map[string]interface{}{
 		"name":         "test-target",
@@ -28,7 +28,7 @@ func TestDaemon_StartStop(t *testing.T) {
 		"enabled":      true, // Must be enabled for the daemon to start
 	}
 	targetJSON, _ := json.Marshal(target)
-	
+
 	config := &types.PoltergeistConfig{
 		Version:     "1.0.0",
 		ProjectType: types.ProjectTypeNode,
@@ -39,16 +39,16 @@ func TestDaemon_StartStop(t *testing.T) {
 	}
 	data, _ := json.Marshal(config)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	daemonConfig := daemon.Config{
 		ProjectRoot: tmpDir,
 		ConfigPath:  configPath,
 		LogFile:     filepath.Join(tmpDir, "daemon.log"),
 		LogLevel:    "info",
 	}
-	
+
 	d := daemon.NewManager(daemonConfig)
-	
+
 	// Start daemon
 	err := d.Start()
 	if err != nil {
@@ -58,31 +58,31 @@ func TestDaemon_StartStop(t *testing.T) {
 		}
 		t.Fatalf("failed to start daemon: %v", err)
 	}
-	
+
 	// Wait for daemon to start
 	time.Sleep(500 * time.Millisecond)
-	
+
 	// Check if daemon is running
 	if !d.IsRunning() {
 		t.Error("expected daemon to be running")
 	}
-	
+
 	// Check status
 	status, err := d.Status()
 	if err != nil {
 		t.Fatalf("failed to get status: %v", err)
 	}
-	
+
 	if status == nil {
 		t.Error("expected non-nil status")
 	}
-	
+
 	// Stop daemon
 	err = d.Stop()
 	if err != nil {
 		t.Fatalf("failed to stop daemon: %v", err)
 	}
-	
+
 	// Check if daemon stopped
 	if d.IsRunning() {
 		t.Error("expected daemon to be stopped")
@@ -91,10 +91,10 @@ func TestDaemon_StartStop(t *testing.T) {
 
 func TestDaemon_Restart(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test config file with a valid target
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	// Create a test target
 	target := map[string]interface{}{
 		"name":         "test-target",
@@ -104,7 +104,7 @@ func TestDaemon_Restart(t *testing.T) {
 		"outputPath":   "test-output",
 	}
 	targetJSON, _ := json.Marshal(target)
-	
+
 	config := &types.PoltergeistConfig{
 		Version:     "1.0.0",
 		ProjectType: types.ProjectTypeNode,
@@ -115,16 +115,16 @@ func TestDaemon_Restart(t *testing.T) {
 	}
 	data, _ := json.Marshal(config)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	daemonConfig := daemon.Config{
 		ProjectRoot: tmpDir,
 		ConfigPath:  configPath,
 		LogFile:     filepath.Join(tmpDir, "daemon.log"),
 		LogLevel:    "info",
 	}
-	
+
 	d := daemon.NewManager(daemonConfig)
-	
+
 	// Start daemon
 	err := d.Start()
 	if err != nil {
@@ -134,24 +134,24 @@ func TestDaemon_Restart(t *testing.T) {
 		}
 		t.Fatalf("failed to start daemon: %v", err)
 	}
-	
+
 	time.Sleep(500 * time.Millisecond)
-	
+
 	// Get original status
 	originalStatus, _ := d.Status()
 	originalPID := 0
 	if originalStatus != nil {
 		originalPID = originalStatus.PID
 	}
-	
+
 	// Restart daemon
 	err = d.Restart()
 	if err != nil {
 		t.Fatalf("failed to restart daemon: %v", err)
 	}
-	
+
 	time.Sleep(500 * time.Millisecond)
-	
+
 	// Check if daemon is running with new PID
 	newStatus, _ := d.Status()
 	if newStatus == nil {
@@ -159,17 +159,17 @@ func TestDaemon_Restart(t *testing.T) {
 	} else if newStatus.PID == originalPID && originalPID != 0 {
 		t.Error("expected daemon to have new PID after restart")
 	}
-	
+
 	// Clean up
 	d.Stop()
 }
 
 func TestDaemon_Status(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test config file with a valid target
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	// Create a test target
 	target := map[string]interface{}{
 		"name":         "test-target",
@@ -179,7 +179,7 @@ func TestDaemon_Status(t *testing.T) {
 		"outputPath":   "test-output",
 	}
 	targetJSON, _ := json.Marshal(target)
-	
+
 	config := &types.PoltergeistConfig{
 		Version:     "1.0.0",
 		ProjectType: types.ProjectTypeNode,
@@ -190,22 +190,22 @@ func TestDaemon_Status(t *testing.T) {
 	}
 	data, _ := json.Marshal(config)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	daemonConfig := daemon.Config{
 		ProjectRoot: tmpDir,
 		ConfigPath:  configPath,
 		LogFile:     filepath.Join(tmpDir, "daemon.log"),
 		LogLevel:    "info",
 	}
-	
+
 	d := daemon.NewManager(daemonConfig)
-	
+
 	// Status when not running
 	status, err := d.Status()
 	if err == nil && status != nil {
 		t.Error("expected no status when daemon not running")
 	}
-	
+
 	// Start daemon
 	err = d.Start()
 	if err != nil {
@@ -215,37 +215,37 @@ func TestDaemon_Status(t *testing.T) {
 		}
 		t.Fatalf("failed to start daemon: %v", err)
 	}
-	
+
 	time.Sleep(500 * time.Millisecond)
-	
+
 	// Status when running
 	status, err = d.Status()
 	if err != nil {
 		t.Fatalf("failed to get status: %v", err)
 	}
-	
+
 	if status == nil {
 		t.Fatal("expected non-nil status")
 	}
-	
+
 	if status.PID == 0 {
 		t.Error("expected non-zero PID")
 	}
-	
+
 	if !status.Running {
 		t.Error("expected daemon to be running")
 	}
-	
+
 	// Clean up
 	d.Stop()
 }
 
 func TestDaemon_MultipleStart(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test config file with a valid target
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	// Create a test target
 	target := map[string]interface{}{
 		"name":         "test-target",
@@ -255,7 +255,7 @@ func TestDaemon_MultipleStart(t *testing.T) {
 		"outputPath":   "test-output",
 	}
 	targetJSON, _ := json.Marshal(target)
-	
+
 	config := &types.PoltergeistConfig{
 		Version:     "1.0.0",
 		ProjectType: types.ProjectTypeNode,
@@ -266,16 +266,16 @@ func TestDaemon_MultipleStart(t *testing.T) {
 	}
 	data, _ := json.Marshal(config)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	daemonConfig := daemon.Config{
 		ProjectRoot: tmpDir,
 		ConfigPath:  configPath,
 		LogFile:     filepath.Join(tmpDir, "daemon.log"),
 		LogLevel:    "info",
 	}
-	
+
 	d := daemon.NewManager(daemonConfig)
-	
+
 	// Start daemon
 	err := d.Start()
 	if err != nil {
@@ -285,31 +285,31 @@ func TestDaemon_MultipleStart(t *testing.T) {
 		}
 		t.Fatalf("failed to start daemon: %v", err)
 	}
-	
+
 	time.Sleep(500 * time.Millisecond)
-	
+
 	// Try to start again - should fail
 	err = d.Start()
 	if err == nil {
 		t.Error("expected error when starting daemon twice")
 	}
-	
+
 	// Clean up
 	d.Stop()
 }
 
 func TestDaemon_StopNotRunning(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	daemonConfig := daemon.Config{
 		ProjectRoot: tmpDir,
 		ConfigPath:  filepath.Join(tmpDir, "poltergeist.config.json"),
 		LogFile:     filepath.Join(tmpDir, "daemon.log"),
 		LogLevel:    "info",
 	}
-	
+
 	d := daemon.NewManager(daemonConfig)
-	
+
 	// Try to stop when not running
 	err := d.Stop()
 	if err == nil {
@@ -319,20 +319,20 @@ func TestDaemon_StopNotRunning(t *testing.T) {
 
 func TestDaemon_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create invalid config file
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
 	os.WriteFile(configPath, []byte("invalid json"), 0644)
-	
+
 	daemonConfig := daemon.Config{
 		ProjectRoot: tmpDir,
 		ConfigPath:  configPath,
 		LogFile:     filepath.Join(tmpDir, "daemon.log"),
 		LogLevel:    "info",
 	}
-	
+
 	d := daemon.NewManager(daemonConfig)
-	
+
 	// Try to start with invalid config
 	err := d.Start()
 	if err == nil {

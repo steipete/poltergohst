@@ -16,33 +16,33 @@ import (
 
 // UnifiedClient provides file watching with Watchman or fsnotify fallback
 type UnifiedClient struct {
-	logger           logger.Logger
-	watchmanConn     *WatchmanConnection
-	fsnotifyWatcher  *FSNotifyWatcher
-	useWatchman      bool
-	subscriptions    map[string]*subscription
-	projectRoot      string
-	config           *types.WatchmanConfig
-	mu               sync.RWMutex
-	ctx              context.Context
-	cancel           context.CancelFunc
-	eventChan        chan FileEvent
-	settlingDelay    time.Duration
-	receiverStarted  bool
+	logger          logger.Logger
+	watchmanConn    *WatchmanConnection
+	fsnotifyWatcher *FSNotifyWatcher
+	useWatchman     bool
+	subscriptions   map[string]*subscription
+	projectRoot     string
+	config          *types.WatchmanConfig
+	mu              sync.RWMutex
+	ctx             context.Context
+	cancel          context.CancelFunc
+	eventChan       chan FileEvent
+	settlingDelay   time.Duration
+	receiverStarted bool
 }
 
 type subscription struct {
-	name      string
-	root      string
+	name       string
+	root       string
 	expression []interface{}
-	callback  interfaces.FileChangeCallback
-	query     SubscriptionQuery
+	callback   interfaces.FileChangeCallback
+	query      SubscriptionQuery
 }
 
 // NewUnifiedClient creates a new unified Watchman/fsnotify client
 func NewUnifiedClient(log logger.Logger, config *types.WatchmanConfig) *UnifiedClient {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	client := &UnifiedClient{
 		logger:        log,
 		subscriptions: make(map[string]*subscription),
@@ -52,7 +52,7 @@ func NewUnifiedClient(log logger.Logger, config *types.WatchmanConfig) *UnifiedC
 		eventChan:     make(chan FileEvent, 1000),
 		settlingDelay: time.Duration(config.SettlingDelay) * time.Millisecond,
 	}
-	
+
 	// Try to connect to Watchman
 	if conn, err := Connect(); err == nil {
 		// Verify connection with version check
@@ -67,12 +67,12 @@ func NewUnifiedClient(log logger.Logger, config *types.WatchmanConfig) *UnifiedC
 	} else {
 		log.Info(fmt.Sprintf("Watchman not available (%v), using fsnotify fallback", err))
 	}
-	
+
 	// Initialize fsnotify if Watchman not available
 	if !client.useWatchman {
 		if watcher, err := NewFSNotifyWatcher(log); err == nil {
 			client.fsnotifyWatcher = watcher
-			
+
 			// Configure fsnotify with config settings
 			if config.ExcludeDirs != nil {
 				client.fsnotifyWatcher.SetExclusions(config.ExcludeDirs)
@@ -84,15 +84,13 @@ func NewUnifiedClient(log logger.Logger, config *types.WatchmanConfig) *UnifiedC
 			log.Error(fmt.Sprintf("Failed to create fsnotify watcher: %v", err))
 		}
 	}
-	
+
 	// Start event processor
 	go client.processEvents()
-	
-	// Start receiving Watchman events if connected
-	if client.useWatchman && client.watchmanConn != nil {
-		go client.receiveWatchmanEvents()
-	}
-	
+
+	// Don't start receiving events yet - wait until after WatchProject is called
+	// to avoid consuming command responses
+
 	return client
 }
 
@@ -102,27 +100,40 @@ func (c *UnifiedClient) Connect(ctx context.Context) error {
 		// Already connected
 		return nil
 	}
-	
+
 	if !c.useWatchman && c.fsnotifyWatcher != nil {
 		// Using fsnotify, already initialized
 		return nil
 	}
-	
+
 	return fmt.Errorf("no file watcher available")
+}
+
+// StartEventReceiver starts the goroutine that receives Watchman events
+// This should be called after all initial setup (WatchProject, Subscribe) is complete
+func (c *UnifiedClient) StartEventReceiver() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.useWatchman && c.watchmanConn != nil && !c.receiverStarted {
+		c.receiverStarted = true
+		go c.receiveWatchmanEvents()
+		c.logger.Debug("Started Watchman event receiver goroutine")
+	}
 }
 
 // Disconnect closes the connection
 func (c *UnifiedClient) Disconnect() error {
 	c.cancel()
-	
+
 	if c.watchmanConn != nil {
 		return c.watchmanConn.Close()
 	}
-	
+
 	if c.fsnotifyWatcher != nil {
 		return c.fsnotifyWatcher.Close()
 	}
-	
+
 	return nil
 }
 
@@ -131,13 +142,16 @@ func (c *UnifiedClient) WatchProject(projectPath string) error {
 	c.mu.Lock()
 	c.projectRoot = projectPath
 	c.mu.Unlock()
-	
+
 	if c.useWatchman {
+		c.logger.Debug(fmt.Sprintf("Sending watch-project command for: %s", projectPath))
 		resp, err := c.watchmanConn.WatchProject(projectPath)
 		if err != nil {
+			c.logger.Error(fmt.Sprintf("watch-project failed: %v", err))
 			return fmt.Errorf("failed to watch project: %w", err)
 		}
-		
+		c.logger.Debug(fmt.Sprintf("watch-project response received: %+v", resp))
+
 		c.mu.Lock()
 		if resp.RelativeRoot != "" {
 			c.projectRoot = filepath.Join(resp.Watch, resp.RelativeRoot)
@@ -145,7 +159,7 @@ func (c *UnifiedClient) WatchProject(projectPath string) error {
 			c.projectRoot = resp.Watch
 		}
 		c.mu.Unlock()
-		
+
 		c.logger.Info(fmt.Sprintf("Watching project with Watchman: %s", c.projectRoot))
 	} else if c.fsnotifyWatcher != nil {
 		// Set up fsnotify watching
@@ -155,12 +169,12 @@ func (c *UnifiedClient) WatchProject(projectPath string) error {
 		if err != nil {
 			return fmt.Errorf("failed to watch project with fsnotify: %w", err)
 		}
-		
+
 		c.logger.Info(fmt.Sprintf("Watching project with fsnotify: %s", projectPath))
 	} else {
 		return fmt.Errorf("no file watcher available")
 	}
-	
+
 	return nil
 }
 
@@ -174,20 +188,20 @@ func (c *UnifiedClient) Subscribe(
 ) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	// Create subscription record
 	sub := &subscription{
-		name:     name,
-		root:     root,
+		name:       name,
+		root:       root,
 		expression: config.Expression,
-		callback: callback,
+		callback:   callback,
 	}
-	
+
 	if c.useWatchman {
 		// Build Watchman query
 		var expressions []Expression
 		var finalExpr Expression
-		
+
 		// Use provided expression if available
 		if len(config.Expression) > 0 {
 			// Convert []interface{} to Expression
@@ -204,23 +218,23 @@ func (c *UnifiedClient) Subscribe(
 					expressions = append(expressions, MatchExpression(pattern, false))
 				}
 			}
-			
+
 			// Add exclusions
 			var exclusionExprs []Expression
 			for _, exc := range exclusions {
 				if exc.Type == "dir" {
 					for _, pattern := range exc.Patterns {
-						exclusionExprs = append(exclusionExprs, 
+						exclusionExprs = append(exclusionExprs,
 							MatchExpression(fmt.Sprintf("**/%s/**", pattern), true))
 					}
 				} else {
 					for _, pattern := range exc.Patterns {
-						exclusionExprs = append(exclusionExprs, 
+						exclusionExprs = append(exclusionExprs,
 							MatchExpression(pattern, false))
 					}
 				}
 			}
-			
+
 			// Add default exclusions from config
 			if c.config.UseDefaultExclusions {
 				for _, dir := range getDefaultExclusions() {
@@ -228,7 +242,7 @@ func (c *UnifiedClient) Subscribe(
 						MatchExpression(fmt.Sprintf("**/%s/**", dir), true))
 				}
 			}
-			
+
 			// Build final expression
 			if len(expressions) > 0 && len(exclusionExprs) > 0 {
 				finalExpr = AllOfExpression(
@@ -241,14 +255,14 @@ func (c *UnifiedClient) Subscribe(
 				finalExpr = MatchExpression("**", true) // Watch everything
 			}
 		}
-		
+
 		// Get initial clock
 		clock, err := c.watchmanConn.Clock(root)
 		if err != nil {
 			c.logger.Warn(fmt.Sprintf("Failed to get clock: %v", err))
 			clock = ""
 		}
-		
+
 		// Create Watchman subscription
 		sub.query = SubscriptionQuery{
 			Expression: finalExpr,
@@ -256,24 +270,24 @@ func (c *UnifiedClient) Subscribe(
 			Since:      clock,
 			Empty:      true,
 		}
-		
+
 		if _, err := c.watchmanConn.Subscribe(root, name, sub.query); err != nil {
 			return fmt.Errorf("failed to create Watchman subscription: %w", err)
 		}
-		
+
 	} else if c.fsnotifyWatcher != nil {
 		// Configure fsnotify patterns from expression
 		// Extract patterns from expression if possible
 		patterns := extractPatternsFromExpression(config.Expression)
 		c.fsnotifyWatcher.SetPatterns(patterns)
-		
+
 		// Note: fsnotify is already set up in WatchProject
 		// The callback is registered there
 	}
-	
+
 	c.subscriptions[name] = sub
 	c.logger.Debug(fmt.Sprintf("Created subscription: %s", name))
-	
+
 	return nil
 }
 
@@ -287,12 +301,12 @@ func (c *UnifiedClient) Unsubscribe(subscriptionName string) error {
 	}
 	delete(c.subscriptions, subscriptionName)
 	c.mu.Unlock()
-	
+
 	if c.useWatchman && c.watchmanConn != nil {
 		err := c.watchmanConn.Unsubscribe(sub.root, subscriptionName)
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -315,7 +329,7 @@ func (c *UnifiedClient) GetVersion() (string, error) {
 // receiveWatchmanEvents receives events from Watchman
 func (c *UnifiedClient) receiveWatchmanEvents() {
 	c.logger.Debug("Starting Watchman event receiver")
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -326,7 +340,7 @@ func (c *UnifiedClient) receiveWatchmanEvents() {
 				c.logger.Debug("Watchman connection lost, stopping event receiver")
 				return
 			}
-			
+
 			// Set read timeout to avoid blocking forever
 			resp, err := c.watchmanConn.Receive()
 			if err != nil {
@@ -336,15 +350,15 @@ func (c *UnifiedClient) receiveWatchmanEvents() {
 				}
 				// Log the error but continue trying to receive events
 				c.logger.Debug(fmt.Sprintf("Error receiving Watchman event (will retry): %v", err))
-				
+
 				// Small delay to avoid tight loop on persistent errors
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			
+
 			// Process subscription notification
 			if resp.Subscription != "" {
-				c.logger.Debug(fmt.Sprintf("Received Watchman subscription event: %s with %d files", 
+				c.logger.Debug(fmt.Sprintf("Received Watchman subscription event: %s with %d files",
 					resp.Subscription, len(resp.Files)))
 				c.handleWatchmanResponse(resp)
 			} else if resp.Log != "" {
@@ -360,24 +374,24 @@ func (c *UnifiedClient) handleWatchmanResponse(resp *WatchmanResponse) {
 	c.mu.RLock()
 	sub, exists := c.subscriptions[resp.Subscription]
 	c.mu.RUnlock()
-	
+
 	if !exists {
 		c.logger.Debug(fmt.Sprintf("Received event for unknown subscription: %s", resp.Subscription))
 		return
 	}
-	
+
 	c.logger.Debug(fmt.Sprintf("Processing %d file changes for subscription %s", len(resp.Files), resp.Subscription))
-	
+
 	// Convert Watchman files to events
 	for _, file := range resp.Files {
 		event := ConvertWatchmanFile(resp.Root, file)
 		c.logger.Debug(fmt.Sprintf("File event: %s (%v)", event.Path, event.Type))
 		c.eventChan <- event
 	}
-	
+
 	// Log that we're queuing events
 	if len(resp.Files) > 0 {
-		c.logger.Debug(fmt.Sprintf("Queued %d events for processing (subscription: %s)", 
+		c.logger.Debug(fmt.Sprintf("Queued %d events for processing (subscription: %s)",
 			len(resp.Files), sub.name))
 	}
 }
@@ -386,15 +400,15 @@ func (c *UnifiedClient) handleWatchmanResponse(resp *WatchmanResponse) {
 func (c *UnifiedClient) processEvents() {
 	pendingEvents := make(map[string]*FileEvent)
 	timers := make(map[string]*time.Timer)
-	
+
 	c.logger.Debug(fmt.Sprintf("Event processor started with settling delay: %v", c.settlingDelay))
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
 			c.logger.Debug("Event processor shutting down")
 			return
-			
+
 		case event := <-c.eventChan:
 			c.logger.Debug(fmt.Sprintf("Processing event for: %s (type: %v)", event.Path, event.Type))
 			// Cancel existing timer if present
@@ -402,10 +416,10 @@ func (c *UnifiedClient) processEvents() {
 				timer.Stop()
 				delete(timers, event.Path)
 			}
-			
+
 			// Store pending event
 			pendingEvents[event.Path] = &event
-			
+
 			// Schedule dispatch after settling delay
 			timer := time.AfterFunc(c.settlingDelay, func() {
 				c.mu.Lock()
@@ -427,7 +441,7 @@ func (c *UnifiedClient) processEvents() {
 func (c *UnifiedClient) dispatchEvent(event FileEvent) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	// Find matching subscriptions
 	for _, sub := range c.subscriptions {
 		if c.eventMatchesSubscription(event, sub) {
@@ -437,7 +451,7 @@ func (c *UnifiedClient) dispatchEvent(event FileEvent) {
 				Exists: event.Type != FileDeleted,
 				Type:   getFileType(event),
 			}
-			
+
 			// Call callback
 			if sub.callback != nil {
 				sub.callback([]interfaces.FileChange{change})
@@ -452,19 +466,19 @@ func (c *UnifiedClient) eventMatchesSubscription(event FileEvent, sub *subscript
 	if !strings.HasPrefix(event.Path, sub.root) {
 		return false
 	}
-	
+
 	// If subscription has expression, assume it matches (already filtered by Watchman)
 	if len(sub.expression) > 0 && c.useWatchman {
 		return true
 	}
-	
+
 	// For fsnotify, check against patterns extracted from expression
 	patterns := extractPatternsFromExpression(sub.expression)
 	for _, pattern := range patterns {
 		if matched, _ := filepath.Match(pattern, filepath.Base(event.Path)); matched {
 			return true
 		}
-		
+
 		// Handle ** patterns
 		if strings.Contains(pattern, "**") {
 			parts := strings.Split(pattern, "**")
@@ -480,7 +494,7 @@ func (c *UnifiedClient) eventMatchesSubscription(event FileEvent, sub *subscript
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -497,14 +511,14 @@ func extractPatternsFromExpression(expr []interface{}) []string {
 	if len(expr) == 0 {
 		return []string{"**"}
 	}
-	
+
 	var patterns []string
 	extractPatterns(expr, &patterns)
-	
+
 	if len(patterns) == 0 {
 		patterns = []string{"**"}
 	}
-	
+
 	return patterns
 }
 
@@ -560,7 +574,7 @@ func (c *UnifiedClient) Watch(ctx context.Context, root string, patterns []strin
 	if err := c.WatchProject(root); err != nil {
 		return err
 	}
-	
+
 	// Build expression for patterns
 	var expressions []Expression
 	for _, pattern := range patterns {
@@ -570,7 +584,7 @@ func (c *UnifiedClient) Watch(ctx context.Context, root string, patterns []strin
 			expressions = append(expressions, MatchExpression(pattern, false))
 		}
 	}
-	
+
 	var finalExpr []interface{}
 	if len(expressions) > 0 {
 		// AnyOfExpression returns []interface{} already
@@ -579,36 +593,36 @@ func (c *UnifiedClient) Watch(ctx context.Context, root string, patterns []strin
 		// MatchExpression returns []interface{} already
 		finalExpr = MatchExpression("**", true).([]interface{})
 	}
-	
+
 	// Create subscription
 	config := interfaces.SubscriptionConfig{
 		Expression: finalExpr,
 		Fields:     []string{"name", "size", "mtime_ms", "exists", "type"},
 	}
-	
+
 	callback := func(changes []interfaces.FileChange) {
 		for _, change := range changes {
 			event := FileEvent{
 				Path:  change.Name,
 				IsDir: change.Type == "d",
 			}
-			
+
 			if change.Exists {
 				event.Type = FileModified
 			} else {
 				event.Type = FileDeleted
 			}
-			
+
 			// Check if it's a new file
 			if change.Type == "f" && change.Exists {
 				// Could check for "new" field from Watchman to determine if created
 				event.Type = FileCreated
 			}
-			
+
 			events <- event
 		}
 	}
-	
+
 	subscriptionName := fmt.Sprintf("watch-%d", time.Now().Unix())
 	return c.Subscribe(root, subscriptionName, config, callback, nil)
 }
@@ -618,10 +632,10 @@ func (c *UnifiedClient) List() []string {
 	if c.fsnotifyWatcher != nil {
 		return c.fsnotifyWatcher.List()
 	}
-	
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	paths := make([]string, 0, len(c.subscriptions))
 	for _, sub := range c.subscriptions {
 		paths = append(paths, sub.root)

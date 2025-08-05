@@ -48,11 +48,11 @@ type CMakeProject struct {
 
 // AnalysisOptions configures CMake analysis
 type AnalysisOptions struct {
-	IncludeTests     bool
-	AnalyzeDeps      bool
-	BuildDir         string
-	Generator        string
-	RecursiveSearch  bool
+	IncludeTests    bool
+	AnalyzeDeps     bool
+	BuildDir        string
+	Generator       string
+	RecursiveSearch bool
 }
 
 // DefaultAnalysisOptions returns default analysis options
@@ -155,7 +155,7 @@ func (a *CMakeAnalyzer) GetRecommendedConfig() (*types.PoltergeistConfig, error)
 	// Create targets based on discovered CMake targets
 	for _, cmakeTarget := range project.Targets {
 		var target interface{}
-		
+
 		switch cmakeTarget.Type {
 		case "EXECUTABLE":
 			target = &types.CMakeExecutableTarget{
@@ -253,7 +253,7 @@ func (a *CMakeAnalyzer) analyzeMainCMakeFile(path string, project *CMakeProject)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip comments
 		if strings.HasPrefix(line, "#") {
 			continue
@@ -262,7 +262,7 @@ func (a *CMakeAnalyzer) analyzeMainCMakeFile(path string, project *CMakeProject)
 		// Extract project name
 		if matches := projectNameRegex.FindStringSubmatch(line); len(matches) > 1 {
 			project.Name = matches[1]
-			
+
 			// Look for version in the same line
 			if versionMatches := versionRegex.FindStringSubmatch(line); len(versionMatches) > 1 {
 				project.Version = versionMatches[1]
@@ -281,7 +281,7 @@ func (a *CMakeAnalyzer) analyzeCMakeFile(path string, project *CMakeProject, opt
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	
+
 	// Regex patterns for different CMake constructs
 	// Updated to capture library type (STATIC, SHARED, MODULE, INTERFACE, OBJECT)
 	targetRegex := regexp.MustCompile(`^\s*(add_executable|add_library)\s*\(\s*([^)\s]+)(?:\s+(STATIC|SHARED|MODULE|INTERFACE|OBJECT))?`)
@@ -292,7 +292,7 @@ func (a *CMakeAnalyzer) analyzeCMakeFile(path string, project *CMakeProject, opt
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip comments
 		if strings.HasPrefix(line, "#") {
 			continue
@@ -341,7 +341,7 @@ func (a *CMakeAnalyzer) analyzeCMakeFile(path string, project *CMakeProject, opt
 		if options.IncludeTests {
 			if matches := addTestRegex.FindStringSubmatch(line); len(matches) > 1 {
 				testName := matches[1]
-				
+
 				target := CMakeTarget{
 					Name:       testName,
 					Type:       "TEST",

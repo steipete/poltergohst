@@ -13,15 +13,15 @@ import (
 func TestTargetValidator_ValidateBasicFields(t *testing.T) {
 	tempDir := t.TempDir()
 	validator := validation.NewTargetValidator(tempDir)
-	
+
 	// Create output directory for valid test
 	os.MkdirAll(filepath.Join(tempDir, "output"), 0755)
 
 	tests := []struct {
 		name          string
 		target        types.Target
-		expectInvalid bool  // Whether result.Valid should be false
-		expectIssue   bool  // Whether any error/warning is expected
+		expectInvalid bool // Whether result.Valid should be false
+		expectIssue   bool // Whether any error/warning is expected
 		errorLevel    validation.ValidationLevel
 	}{
 		{
@@ -90,8 +90,8 @@ func TestTargetValidator_ValidateBasicFields(t *testing.T) {
 					WatchPaths:   []string{},
 				},
 			},
-			expectInvalid: false,  // Warnings don't make result invalid
-			expectIssue:   true,   // But we still expect a warning
+			expectInvalid: false, // Warnings don't make result invalid
+			expectIssue:   true,  // But we still expect a warning
 			errorLevel:    validation.ValidationLevelWarning,
 		},
 	}
@@ -138,11 +138,11 @@ func TestTargetValidator_ValidateTypeSpecific(t *testing.T) {
 	validator := validation.NewTargetValidator(tempDir)
 
 	tests := []struct {
-		name           string
-		target         types.Target
-		expectWarning  bool
-		expectError    bool
-		expectedField  string
+		name          string
+		target        types.Target
+		expectWarning bool
+		expectError   bool
+		expectedField string
 	}{
 		{
 			name: "executable without output path",
@@ -709,9 +709,9 @@ func TestTargetValidator_ComplexValidation(t *testing.T) {
 
 	// Create test files
 	files := map[string]string{
-		"src/main.go":    "package main",
+		"src/main.go":       "package main",
 		"test/main_test.go": "package main",
-		"Makefile":       "all:\n\techo build",
+		"Makefile":          "all:\n\techo build",
 	}
 
 	for path, content := range files {
@@ -725,8 +725,8 @@ func TestTargetValidator_ComplexValidation(t *testing.T) {
 	// Complex target with multiple watch paths and validation scenarios
 	target := &types.ExecutableTarget{
 		BaseTarget: types.BaseTarget{
-			Name: "complex-target",
-			Type: types.TargetTypeExecutable,
+			Name:         "complex-target",
+			Type:         types.TargetTypeExecutable,
 			BuildCommand: "make && go build -o build/app ./src",
 			WatchPaths: []string{
 				"src/**/*.go",    // Pattern path (valid)

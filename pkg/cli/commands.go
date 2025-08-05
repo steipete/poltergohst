@@ -69,7 +69,7 @@ func newDaemonCmd() *cobra.Command {
 		Short: "Manage the Poltergeist daemon",
 		Long:  `Control the Poltergeist background daemon process.`,
 	}
-	
+
 	cmd.AddCommand(
 		&cobra.Command{
 			Use:   "start",
@@ -100,14 +100,14 @@ func newDaemonCmd() *cobra.Command {
 			},
 		},
 	)
-	
+
 	return cmd
 }
 
 func newLogsCmd() *cobra.Command {
 	var follow bool
 	var lines int
-	
+
 	cmd := &cobra.Command{
 		Use:   "logs [target]",
 		Short: "Show build logs",
@@ -121,10 +121,10 @@ func newLogsCmd() *cobra.Command {
 			return runLogs(targetName, follow, lines)
 		},
 	}
-	
+
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow log output")
 	cmd.Flags().IntVarP(&lines, "lines", "n", 50, "number of lines to show")
-	
+
 	return cmd
 }
 
@@ -158,32 +158,32 @@ func runStatus() error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	// Create state manager
 	sm := state.NewStateManager(projectRoot, nil)
-	
+
 	// Discover all states
 	states, err := sm.DiscoverStates()
 	if err != nil {
 		return fmt.Errorf("failed to discover states: %w", err)
 	}
-	
+
 	// Print status table
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "TARGET\tSTATUS\tLAST BUILD\tBUILDS\tFAILURES")
 	fmt.Fprintln(w, "------\t------\t----------\t------\t--------")
-	
+
 	for _, rawTarget := range cfg.Targets {
 		target, err := types.ParseTarget(rawTarget)
 		if err != nil {
 			continue
 		}
-		
+
 		status := "idle"
 		lastBuild := "-"
 		builds := 0
 		failures := 0
-		
+
 		if state, ok := states[target.GetName()]; ok {
 			status = string(state.BuildStatus)
 			if !state.LastBuildTime.IsZero() {
@@ -192,7 +192,7 @@ func runStatus() error {
 			builds = state.BuildCount
 			failures = state.FailureCount
 		}
-		
+
 		// Color status
 		statusColor := color.WhiteString(status)
 		switch status {
@@ -203,7 +203,7 @@ func runStatus() error {
 		case "building":
 			statusColor = color.YellowString(status)
 		}
-		
+
 		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n",
 			target.GetName(),
 			statusColor,
@@ -212,7 +212,7 @@ func runStatus() error {
 			failures,
 		)
 	}
-	
+
 	w.Flush()
 	return nil
 }
@@ -222,26 +222,26 @@ func runList() error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	printInfo(fmt.Sprintf("Project type: %s", cfg.ProjectType))
 	fmt.Println()
-	
+
 	// Print targets table
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tTYPE\tENABLED\tWATCH PATHS")
 	fmt.Fprintln(w, "----\t----\t-------\t-----------")
-	
+
 	for _, rawTarget := range cfg.Targets {
 		target, err := types.ParseTarget(rawTarget)
 		if err != nil {
 			continue
 		}
-		
+
 		enabled := "✓"
 		if !target.IsEnabled() {
 			enabled = "✗"
 		}
-		
+
 		watchPaths := ""
 		if len(target.GetWatchPaths()) > 0 {
 			watchPaths = target.GetWatchPaths()[0]
@@ -249,7 +249,7 @@ func runList() error {
 				watchPaths += fmt.Sprintf(" (+%d more)", len(target.GetWatchPaths())-1)
 			}
 		}
-		
+
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			target.GetName(),
 			target.GetType(),
@@ -257,20 +257,20 @@ func runList() error {
 			watchPaths,
 		)
 	}
-	
+
 	w.Flush()
 	return nil
 }
 
 func runBuild(targetName string) error {
 	printInfo(fmt.Sprintf("Building target: %s", targetName))
-	
+
 	// Load configuration
 	cfg, err := loadConfig(getConfigPath())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	// Find target
 	var target types.Target
 	found := false
@@ -285,14 +285,14 @@ func runBuild(targetName string) error {
 			break
 		}
 	}
-	
+
 	if !found {
 		return fmt.Errorf("target not found: %s", targetName)
 	}
-	
+
 	// Create state manager
 	sm := state.NewStateManager(projectRoot, nil)
-	
+
 	// Execute build command
 	buildCmd := target.GetBuildCommand()
 	if buildCmd == "" {
@@ -318,26 +318,26 @@ func runBuild(targetName string) error {
 			return fmt.Errorf("no build command defined for target %s", targetName)
 		}
 	}
-	
+
 	printInfo(fmt.Sprintf("Running: %s", buildCmd))
-	
+
 	// Execute the build
 	cmd := exec.Command("sh", "-c", buildCmd)
 	cmd.Dir = projectRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	startTime := time.Now()
 	err = cmd.Run()
 	duration := time.Since(startTime)
-	
+
 	// Update state
 	if err != nil {
 		sm.UpdateBuildStatus(targetName, types.BuildStatusFailed)
 		printError(fmt.Sprintf("Build failed for %s (%.2fs): %v", targetName, duration.Seconds(), err))
 		return err
 	}
-	
+
 	sm.UpdateBuildStatus(targetName, types.BuildStatusSucceeded)
 	printSuccess(fmt.Sprintf("Build succeeded for %s (%.2fs)", targetName, duration.Seconds()))
 	return nil
@@ -349,7 +349,7 @@ func runClean() error {
 	if err := os.RemoveAll(stateDir); err != nil {
 		return fmt.Errorf("failed to remove state directory: %w", err)
 	}
-	
+
 	printSuccess("Cleaned build artifacts and state")
 	return nil
 }
@@ -381,13 +381,13 @@ func runDaemonStatus() error {
 func runLogs(targetName string, follow bool, lines int) error {
 	// Determine log directory
 	logDir := filepath.Join(projectRoot, ".poltergeist", "logs")
-	
+
 	// Check if log directory exists
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
 		printWarning("No logs found. Run 'poltergeist watch' to start logging.")
 		return nil
 	}
-	
+
 	// Get log files to display
 	var logFiles []string
 	if targetName != "" {
@@ -404,27 +404,27 @@ func runLogs(targetName string, follow bool, lines int) error {
 		if err != nil {
 			return fmt.Errorf("failed to read log directory: %w", err)
 		}
-		
+
 		for _, entry := range entries {
 			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".log" {
 				logFiles = append(logFiles, filepath.Join(logDir, entry.Name()))
 			}
 		}
-		
+
 		if len(logFiles) == 0 {
 			printWarning("No log files found")
 			return nil
 		}
 		printInfo("Showing all logs")
 	}
-	
+
 	// Display logs
 	for _, logFile := range logFiles {
 		if err := displayLogFile(logFile, lines, follow); err != nil {
 			printError(fmt.Sprintf("Failed to display %s: %v", filepath.Base(logFile), err))
 		}
 	}
-	
+
 	return nil
 }
 
@@ -434,7 +434,7 @@ func displayLogFile(logFile string, lines int, follow bool) error {
 		cmd := exec.Command("tail", "-f", "-n", fmt.Sprintf("%d", lines), logFile)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		
+
 		// Handle interrupt gracefully
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt)
@@ -444,7 +444,7 @@ func displayLogFile(logFile string, lines int, follow bool) error {
 				cmd.Process.Kill()
 			}
 		}()
-		
+
 		return cmd.Run()
 	} else {
 		// Read last N lines
@@ -452,13 +452,13 @@ func displayLogFile(logFile string, lines int, follow bool) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Print header if multiple files
 		targetName := strings.TrimSuffix(filepath.Base(logFile), ".log")
 		fmt.Printf("\n=== %s ===\n", targetName)
 		fmt.Print(content)
 	}
-	
+
 	return nil
 }
 
@@ -468,58 +468,58 @@ func readLastNLines(filename string, n int) (string, error) {
 		return "", err
 	}
 	defer file.Close()
-	
+
 	// Read all lines
 	var allLines []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		allLines = append(allLines, scanner.Text())
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
-	
+
 	// Get last N lines
 	start := 0
 	if len(allLines) > n {
 		start = len(allLines) - n
 	}
-	
+
 	lastLines := allLines[start:]
 	return strings.Join(lastLines, "\n") + "\n", nil
 }
 
 func runValidate() error {
 	configPath := getConfigPath()
-	
+
 	// Try to load and validate config
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		printError(fmt.Sprintf("Configuration is invalid: %v", err))
 		return err
 	}
-	
+
 	// Validate targets
 	errors := []string{}
 	warnings := []string{}
-	
+
 	for i, rawTarget := range cfg.Targets {
 		target, err := types.ParseTarget(rawTarget)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("Target %d: %v", i, err))
 			continue
 		}
-		
+
 		// Check for common issues
 		if target.GetName() == "" {
 			errors = append(errors, fmt.Sprintf("Target %d: missing name", i))
 		}
-		
+
 		if len(target.GetWatchPaths()) == 0 {
 			warnings = append(warnings, fmt.Sprintf("Target '%s': no watch paths defined", target.GetName()))
 		}
-		
+
 		// Check for build command (test targets can use testCommand instead)
 		if target.GetType() == "test" {
 			// Check raw target for test command
@@ -537,7 +537,7 @@ func runValidate() error {
 			errors = append(errors, fmt.Sprintf("Target '%s': no build command defined", target.GetName()))
 		}
 	}
-	
+
 	// Print results
 	if len(errors) > 0 {
 		printError("Configuration has errors:")
@@ -545,18 +545,18 @@ func runValidate() error {
 			fmt.Printf("  ✗ %s\n", err)
 		}
 	}
-	
+
 	if len(warnings) > 0 {
 		printWarning("Configuration warnings:")
 		for _, warn := range warnings {
 			fmt.Printf("  ⚠ %s\n", warn)
 		}
 	}
-	
+
 	if len(errors) == 0 {
 		printSuccess("Configuration is valid")
 		return nil
 	}
-	
+
 	return fmt.Errorf("configuration has %d error(s)", len(errors))
 }

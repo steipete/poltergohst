@@ -192,7 +192,7 @@ version = "0.1.0"`
 
 	// Clean up and test with requirements.txt
 	os.Remove(filepath.Join(tempDir, "pyproject.toml"))
-	
+
 	requirements := `requests==2.28.0
 numpy==1.21.0`
 	err = os.WriteFile(filepath.Join(tempDir, "requirements.txt"), []byte(requirements), 0644)
@@ -267,10 +267,10 @@ func TestDetectProjectType_Priority(t *testing.T) {
 
 	// Create multiple project files - Swift should have priority
 	files := map[string]string{
-		"Package.swift":  "// swift package",
-		"package.json":   `{"name": "test"}`,
-		"Cargo.toml":     "[package]\nname = \"test\"",
-		"Makefile":       "all:\n\techo test",
+		"Package.swift": "// swift package",
+		"package.json":  `{"name": "test"}`,
+		"Cargo.toml":    "[package]\nname = \"test\"",
+		"Makefile":      "all:\n\techo test",
 	}
 
 	for filename, content := range files {

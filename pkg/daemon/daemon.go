@@ -43,10 +43,10 @@ type Config struct {
 func NewManager(config Config) *Manager {
 	stateDir := filepath.Join(config.ProjectRoot, ".poltergeist")
 	pidFile := filepath.Join(stateDir, "daemon.pid")
-	
+
 	// Create logger
 	log := logger.CreateLogger(config.LogFile, config.LogLevel)
-	
+
 	return &Manager{
 		projectRoot:    config.ProjectRoot,
 		configPath:     config.ConfigPath,
@@ -62,56 +62,56 @@ func NewManager(config Config) *Manager {
 func (m *Manager) StartWithContext(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Check if already running
 	if m.isRunning() {
 		return ErrDaemonAlreadyRunning
 	}
-	
+
 	// Ensure state directory exists
 	if err := os.MkdirAll(m.stateDir, 0755); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
-	
+
 	// Write PID file
 	if err := m.writePIDFile(); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
-	
+
 	// Load configuration
 	cfg, err := m.loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	// Create dependency factory and build dependencies
 	factory := poltergeist.NewDependencyFactory(m.projectRoot, m.logger, cfg)
 	deps := factory.CreateDefaults()
-	
+
 	// Create Poltergeist instance with properly injected dependencies
 	m.poltergeist = poltergeist.New(cfg, m.projectRoot, m.logger, deps, m.configPath)
-	
+
 	// Register shutdown handler
 	m.processManager.RegisterShutdownHandler(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		m.StopWithContext(shutdownCtx)
 	})
-	
+
 	// Start process manager with context
 	m.processManager.Start(ctx)
-	
+
 	// Start Poltergeist with context
 	if err := m.poltergeist.StartWithContext(ctx, ""); err != nil {
 		m.removePIDFile()
 		return fmt.Errorf("failed to start Poltergeist: %w", err)
 	}
-	
+
 	m.logger.Info("Daemon started successfully")
-	
+
 	// Run in background with context
 	go m.runWithContext(ctx)
-	
+
 	return nil
 }
 
@@ -124,27 +124,27 @@ func (m *Manager) Start() error {
 func (m *Manager) StopWithContext(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if !m.isRunning() {
 		return ErrDaemonNotRunning
 	}
-	
+
 	m.logger.Info("Stopping daemon...")
-	
+
 	// Stop Poltergeist with context
 	if m.poltergeist != nil {
 		m.poltergeist.StopWithContext(ctx)
 		m.poltergeist.Cleanup()
 	}
-	
+
 	// Stop process manager
 	m.processManager.Stop()
-	
+
 	// Remove PID file
 	m.removePIDFile()
-	
+
 	m.logger.Info("Daemon stopped")
-	
+
 	return nil
 }
 
@@ -163,10 +163,10 @@ func (m *Manager) Restart() error {
 			return err
 		}
 	}
-	
+
 	// Wait a moment
 	time.Sleep(2 * time.Second)
-	
+
 	return m.Start()
 }
 
@@ -174,32 +174,32 @@ func (m *Manager) Restart() error {
 func (m *Manager) Status() (*Status, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	if !m.isRunning() {
 		return nil, nil
 	}
-	
+
 	status := &Status{
 		Running: true,
 	}
-	
+
 	// Daemon is running, get additional info
 	pid, err := m.readPIDFile()
 	if err == nil {
 		status.PID = pid
-		
+
 		// Get process info
 		if info, err := process.GetProcessInfo(pid); err == nil {
 			status.StartTime = info.StartTime
 		}
 	}
-	
+
 	// Get target information
 	if m.poltergeist != nil {
 		// TODO: Get targets from Poltergeist
 		status.Targets = []string{}
 	}
-	
+
 	return status, nil
 }
 
@@ -229,13 +229,13 @@ func (m *Manager) isRunning() bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Check if process exists
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
-	
+
 	// Check if process is alive
 	err = proc.Signal(os.Signal(nil))
 	return err == nil
@@ -251,12 +251,12 @@ func (m *Manager) readPIDFile() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	var pid int
 	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
 		return 0, err
 	}
-	
+
 	return pid, nil
 }
 
@@ -269,12 +269,12 @@ func (m *Manager) loadConfig() (*types.PoltergeistConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var cfg types.PoltergeistConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	
+
 	return &cfg, nil
 }
 
@@ -290,19 +290,19 @@ type Status struct {
 
 // Worker represents a daemon worker process
 type Worker struct {
-	id             string
-	targetName     string
-	builder        interfaces.Builder
-	logger         logger.Logger
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
+	id         string
+	targetName string
+	builder    interfaces.Builder
+	logger     logger.Logger
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 // NewWorker creates a new worker
 func NewWorker(id string, targetName string, builder interfaces.Builder, log logger.Logger) *Worker {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &Worker{
 		id:         id,
 		targetName: targetName,
@@ -328,9 +328,9 @@ func (w *Worker) Stop() {
 // run is the worker's main loop
 func (w *Worker) run() {
 	defer w.wg.Done()
-	
+
 	w.logger.Info("Worker started", logger.WithField("id", w.id))
-	
+
 	for {
 		select {
 		case <-w.ctx.Done():

@@ -20,10 +20,10 @@ func NewClient(log logger.Logger) *Client {
 	// Create default config if not provided
 	config := &types.WatchmanConfig{
 		UseDefaultExclusions: true,
-		SettlingDelay:       1000,
-		MaxFileEvents:       1000,
+		SettlingDelay:        1000,
+		MaxFileEvents:        1000,
 	}
-	
+
 	return &Client{
 		impl: NewUnifiedClient(log, config),
 	}
@@ -100,14 +100,14 @@ func NewFallbackWatcher(log logger.Logger) (*FallbackWatcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &FallbackWatcher{impl: impl}, nil
 }
 
 // Watch starts watching a directory
 func (f *FallbackWatcher) Watch(ctx context.Context, root string, patterns []string, events chan FileEvent) error {
 	f.impl.SetPatterns(patterns)
-	
+
 	callback := func(event FileEvent) {
 		select {
 		case events <- event:
@@ -115,7 +115,7 @@ func (f *FallbackWatcher) Watch(ctx context.Context, root string, patterns []str
 			return
 		}
 	}
-	
+
 	return f.impl.WatchProject(root, callback)
 }
 
@@ -129,11 +129,11 @@ func (f *FallbackWatcher) SetConfig(config *types.WatchmanConfig) {
 	if config == nil {
 		return
 	}
-	
+
 	if config.SettlingDelay > 0 {
 		f.impl.SetSettlingDelay(time.Duration(config.SettlingDelay) * time.Millisecond)
 	}
-	
+
 	if len(config.ExcludeDirs) > 0 {
 		f.impl.SetExclusions(config.ExcludeDirs)
 	}

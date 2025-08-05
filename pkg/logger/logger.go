@@ -50,11 +50,11 @@ type CustomFormatter struct {
 func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	ghost := "👻"
 	timestamp := entry.Time.Format(f.TimestampFormat)
-	
+
 	// Color the level
 	var levelColor *color.Color
 	var levelText string
-	
+
 	switch entry.Level {
 	case logrus.ErrorLevel:
 		levelColor = color.New(color.FgRed, color.Bold)
@@ -72,28 +72,28 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		levelColor = color.New(color.FgGreen)
 		levelText = "SUCCESS"
 	}
-	
+
 	// Build target prefix
 	targetPrefix := ""
 	if target, ok := entry.Data["target"]; ok {
 		targetPrefix = fmt.Sprintf("[%s] ", color.New(color.FgBlue).Sprint(target))
 		delete(entry.Data, "target") // Remove from data to avoid duplication
 	}
-	
+
 	// Format the message
 	var output string
 	if f.DisableColors {
 		output = fmt.Sprintf("%s [%s] %s: %s%s", ghost, timestamp, levelText, targetPrefix, entry.Message)
 	} else {
-		output = fmt.Sprintf("%s [%s] %s: %s%s", 
-			ghost, 
-			timestamp, 
+		output = fmt.Sprintf("%s [%s] %s: %s%s",
+			ghost,
+			timestamp,
 			levelColor.Sprint(levelText),
 			targetPrefix,
 			entry.Message,
 		)
 	}
-	
+
 	// Add remaining fields
 	if len(entry.Data) > 0 {
 		fields := " {"
@@ -108,27 +108,27 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		fields += "}"
 		output += color.New(color.FgWhite, color.Faint).Sprint(fields)
 	}
-	
+
 	return []byte(output + "\n"), nil
 }
 
 // CreateLogger creates a new logger instance
 func CreateLogger(logFile string, logLevel string) Logger {
 	log := logrus.New()
-	
+
 	// Set log level
 	level, err := logrus.ParseLevel(logLevel)
 	if err != nil {
 		level = logrus.InfoLevel
 	}
 	log.SetLevel(level)
-	
+
 	// Set custom formatter for console
 	log.SetFormatter(&CustomFormatter{
 		TimestampFormat: "15:04:05",
 		DisableColors:   false,
 	})
-	
+
 	// Add file output if specified
 	if logFile != "" {
 		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -137,7 +137,7 @@ func CreateLogger(logFile string, logLevel string) Logger {
 			log.SetOutput(multiWriter)
 		}
 	}
-	
+
 	return &TargetLogger{
 		logger: log,
 	}
@@ -157,23 +157,23 @@ func CreateTargetLogger(baseLogger Logger, targetName string) Logger {
 // CreateLoggerWithOutput creates a logger with custom output (for testing)
 func CreateLoggerWithOutput(logFile string, logLevel string, output io.Writer) Logger {
 	log := logrus.New()
-	
+
 	// Set log level
 	level, err := logrus.ParseLevel(logLevel)
 	if err != nil {
 		level = logrus.InfoLevel
 	}
 	log.SetLevel(level)
-	
+
 	// Set custom formatter for console
 	log.SetFormatter(&CustomFormatter{
 		TimestampFormat: "15:04:05",
 		DisableColors:   true, // Disable colors for test output
 	})
-	
+
 	// Set custom output
 	log.SetOutput(output)
-	
+
 	return &TargetLogger{
 		logger: log,
 	}
@@ -247,7 +247,7 @@ func NewSimpleLogger(targetName string, logLevel string) Logger {
 	if err != nil {
 		level = logrus.InfoLevel
 	}
-	
+
 	return &SimpleLogger{
 		targetName: targetName,
 		logLevel:   level,

@@ -13,7 +13,7 @@ import (
 func newInitCmd() *cobra.Command {
 	var projectType string
 	var force bool
-	
+
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize a new Poltergeist configuration",
@@ -23,21 +23,21 @@ This command will detect your project type and create a suitable configuration.`
 			return runInit(projectType, force)
 		},
 	}
-	
+
 	cmd.Flags().StringVarP(&projectType, "type", "t", "", "project type (swift, node, rust, python, cmake, mixed)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing configuration")
-	
+
 	return cmd
 }
 
 func runInit(projectType string, force bool) error {
 	configPath := getConfigPath()
-	
+
 	// Check if config already exists
 	if _, err := os.Stat(configPath); err == nil && !force {
 		return fmt.Errorf("configuration already exists. Use --force to overwrite")
 	}
-	
+
 	// Detect project type if not specified
 	if projectType == "" {
 		detected := detectProjectType()
@@ -49,23 +49,23 @@ func runInit(projectType string, force bool) error {
 			printInfo("Could not detect project type, using 'mixed'")
 		}
 	}
-	
+
 	// Create configuration
 	cfg := createDefaultConfig(projectType)
-	
+
 	// Write configuration
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	
+
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
-	
+
 	printSuccess(fmt.Sprintf("Created configuration at %s", configPath))
 	printInfo("Edit the configuration to customize your targets and build commands")
-	
+
 	return nil
 }
 
@@ -80,13 +80,13 @@ func detectProjectType() string {
 		"CMakeLists.txt":   "cmake",
 		"Makefile":         "mixed",
 	}
-	
+
 	for file, projectType := range checks {
 		if _, err := os.Stat(filepath.Join(projectRoot, file)); err == nil {
 			return projectType
 		}
 	}
-	
+
 	return ""
 }
 
@@ -96,7 +96,7 @@ func createDefaultConfig(projectType string) *types.PoltergeistConfig {
 		ProjectType: types.ProjectType(projectType),
 		Targets:     []json.RawMessage{},
 	}
-	
+
 	// Add default targets based on project type
 	switch projectType {
 	case "swift":
@@ -112,7 +112,7 @@ func createDefaultConfig(projectType string) *types.PoltergeistConfig {
 	default:
 		cfg.Targets = createMixedTargets()
 	}
-	
+
 	// Add default watchman config
 	cfg.Watchman = &types.WatchmanConfig{
 		UseDefaultExclusions: true,
@@ -130,7 +130,7 @@ func createDefaultConfig(projectType string) *types.PoltergeistConfig {
 		RecrawlThreshold: 10000,
 		SettlingDelay:    1000,
 	}
-	
+
 	// Add default performance config
 	cfg.Performance = &types.PerformanceConfig{
 		Profile:      types.PerformanceProfileBalanced,
@@ -140,7 +140,7 @@ func createDefaultConfig(projectType string) *types.PoltergeistConfig {
 			ReportInterval: 300,
 		},
 	}
-	
+
 	// Add default build scheduling
 	cfg.BuildScheduling = &types.BuildSchedulingConfig{
 		Parallelization: 2,
@@ -151,13 +151,13 @@ func createDefaultConfig(projectType string) *types.PoltergeistConfig {
 			BuildTimeoutMultiplier: 2.0,
 		},
 	}
-	
+
 	// Add notifications
 	enabled := true
 	cfg.Notifications = &types.NotificationConfig{
 		Enabled: &enabled,
 	}
-	
+
 	return cfg
 }
 
@@ -172,13 +172,13 @@ func createSwiftTargets() []json.RawMessage {
 			"bundleId":     "com.example.myapp",
 		},
 		map[string]interface{}{
-			"name":         "Tests",
-			"type":         "test",
-			"testCommand":  "swift test",
-			"watchPaths":   []string{"Tests/**/*.swift", "Sources/**/*.swift"},
+			"name":        "Tests",
+			"type":        "test",
+			"testCommand": "swift test",
+			"watchPaths":  []string{"Tests/**/*.swift", "Sources/**/*.swift"},
 		},
 	}
-	
+
 	return marshalTargets(targets)
 }
 
@@ -198,7 +198,7 @@ func createNodeTargets() []json.RawMessage {
 			"watchPaths":  []string{"src/**/*", "test/**/*"},
 		},
 	}
-	
+
 	return marshalTargets(targets)
 }
 
@@ -226,7 +226,7 @@ func createRustTargets() []json.RawMessage {
 			"watchPaths":  []string{"src/**/*.rs", "tests/**/*.rs"},
 		},
 	}
-	
+
 	return marshalTargets(targets)
 }
 
@@ -245,7 +245,7 @@ func createPythonTargets() []json.RawMessage {
 			"watchPaths":   []string{"src/**/*.py"},
 		},
 	}
-	
+
 	return marshalTargets(targets)
 }
 
@@ -259,7 +259,7 @@ func createCMakeTargets() []json.RawMessage {
 			"watchPaths": []string{"src/**/*", "include/**/*", "CMakeLists.txt"},
 		},
 	}
-	
+
 	return marshalTargets(targets)
 }
 
@@ -272,13 +272,13 @@ func createMixedTargets() []json.RawMessage {
 			"watchPaths":   []string{"src/**/*", "Makefile"},
 		},
 		map[string]interface{}{
-			"name":         "test",
-			"type":         "test",
-			"testCommand":  "make test",
-			"watchPaths":   []string{"src/**/*", "test/**/*"},
+			"name":        "test",
+			"type":        "test",
+			"testCommand": "make test",
+			"watchPaths":  []string{"src/**/*", "test/**/*"},
 		},
 	}
-	
+
 	return marshalTargets(targets)
 }
 

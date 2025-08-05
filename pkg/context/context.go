@@ -107,20 +107,20 @@ func GenerateCorrelationID() string {
 // EnrichContext adds common tracing information to a context
 func EnrichContext(parent context.Context) context.Context {
 	ctx := parent
-	
+
 	// Add request ID if not present
 	if GetRequestID(ctx) == "unknown-request" {
 		ctx = WithRequestID(ctx, GenerateRequestID())
 	}
-	
+
 	// Add correlation ID if not present
 	if GetCorrelationID(ctx) == "unknown-correlation" {
 		ctx = WithCorrelationID(ctx, GenerateCorrelationID())
 	}
-	
+
 	// Add start time
 	ctx = WithStartTime(ctx, time.Now())
-	
+
 	return ctx
 }
 

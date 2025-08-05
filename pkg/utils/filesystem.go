@@ -51,30 +51,30 @@ func (f *FileSystemUtils) CopyFile(src, dst string) error {
 		return err
 	}
 	defer sourceFile.Close()
-	
+
 	// Create destination directory if needed
 	destDir := filepath.Dir(dst)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}
-	
+
 	destFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer destFile.Close()
-	
+
 	// Copy contents
 	if _, err := io.Copy(destFile, sourceFile); err != nil {
 		return err
 	}
-	
+
 	// Copy permissions
 	sourceInfo, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
-	
+
 	return os.Chmod(dst, sourceInfo.Mode())
 }
 
@@ -84,12 +84,12 @@ func (f *FileSystemUtils) MoveFile(src, dst string) error {
 	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
-	
+
 	// Fall back to copy and delete
 	if err := f.CopyFile(src, dst); err != nil {
 		return err
 	}
-	
+
 	return os.Remove(src)
 }
 
@@ -105,13 +105,13 @@ func (f *FileSystemUtils) WriteFile(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	
+
 	// Write atomically using temp file
 	tempFile := path + ".tmp"
 	if err := os.WriteFile(tempFile, data, 0644); err != nil {
 		return err
 	}
-	
+
 	return os.Rename(tempFile, path)
 }
 
@@ -132,40 +132,40 @@ func (f *FileSystemUtils) GetFileHash(path string) (string, error) {
 		return "", err
 	}
 	defer file.Close()
-	
+
 	hash := md5.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", err
 	}
-	
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // FindFiles finds files matching a pattern
 func (f *FileSystemUtils) FindFiles(root string, pattern string) ([]string, error) {
 	var matches []string
-	
+
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		
+
 		if info.IsDir() {
 			return nil
 		}
-		
+
 		matched, err := filepath.Match(pattern, filepath.Base(path))
 		if err != nil {
 			return err
 		}
-		
+
 		if matched {
 			matches = append(matches, path)
 		}
-		
+
 		return nil
 	})
-	
+
 	return matches, err
 }
 
@@ -178,7 +178,7 @@ func (f *FileSystemUtils) GetRelativePath(base, target string) (string, error) {
 func (f *FileSystemUtils) NormalizePath(path string) string {
 	// Clean the path
 	path = filepath.Clean(path)
-	
+
 	// Expand home directory
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
@@ -186,14 +186,14 @@ func (f *FileSystemUtils) NormalizePath(path string) string {
 			path = filepath.Join(home, path[2:])
 		}
 	}
-	
+
 	// Make absolute if relative
 	if !filepath.IsAbs(path) {
 		if abs, err := filepath.Abs(path); err == nil {
 			path = abs
 		}
 	}
-	
+
 	return path
 }
 
@@ -251,7 +251,7 @@ func TouchFile(path string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	
+
 	// Create or update file
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -335,21 +335,21 @@ func CopyDirectory(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Get relative path
 		relPath, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
 		}
-		
+
 		// Construct destination path
 		dstPath := filepath.Join(dst, relPath)
-		
+
 		if info.IsDir() {
 			// Create directory
 			return os.MkdirAll(dstPath, info.Mode())
 		}
-		
+
 		// Copy file
 		utils := &FileSystemUtils{}
 		return utils.CopyFile(path, dstPath)
@@ -359,7 +359,7 @@ func CopyDirectory(src, dst string) error {
 // GetDirectorySize calculates the total size of a directory
 func GetDirectorySize(path string) (int64, error) {
 	var size int64
-	
+
 	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -369,7 +369,7 @@ func GetDirectorySize(path string) (int64, error) {
 		}
 		return nil
 	})
-	
+
 	return size, err
 }
 
@@ -379,12 +379,12 @@ func FormatBytes(bytes int64) string {
 	if bytes < unit {
 		return fmt.Sprintf("%d B", bytes)
 	}
-	
+
 	div, exp := int64(unit), 0
 	for n := bytes / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
-	
+
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

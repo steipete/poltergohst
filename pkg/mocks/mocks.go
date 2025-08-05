@@ -36,18 +36,18 @@ func (m *MockStateManager) InitializeState(target types.Target) (*state.Polterge
 	if m.initError != nil {
 		return nil, m.initError
 	}
-	
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	state := &state.PoltergeistState{
-		TargetName:   target.GetName(),
+		TargetName:    target.GetName(),
 		LastBuildTime: time.Now(),
-		BuildStatus:  types.BuildStatusQueued,
-		BuildCount:   0,
-		FailureCount: 0,
+		BuildStatus:   types.BuildStatusQueued,
+		BuildCount:    0,
+		FailureCount:  0,
 	}
-	
+
 	m.states[target.GetName()] = state
 	return state, nil
 }
@@ -57,27 +57,27 @@ func (m *MockStateManager) UpdateState(targetName string, status types.BuildStat
 	if m.updateError != nil {
 		return m.updateError
 	}
-	
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if state, ok := m.states[targetName]; ok {
 		state.BuildStatus = status
 		state.LastBuildTime = time.Now()
 		state.BuildCount++
-		
+
 		if status == types.BuildStatusSucceeded {
 			// Success count tracked via BuildCount - FailureCount
 		} else if status == types.BuildStatusFailed {
 			state.FailureCount++
 		}
-		
+
 		state.LastError = ""
 		if status == types.BuildStatusFailed {
 			state.LastError = "mock error"
 		}
 	}
-	
+
 	return nil
 }
 
@@ -85,12 +85,12 @@ func (m *MockStateManager) UpdateState(targetName string, status types.BuildStat
 func (m *MockStateManager) GetState(targetName string) (*state.PoltergeistState, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	state, ok := m.states[targetName]
 	if !ok {
 		return nil, nil
 	}
-	
+
 	return state, nil
 }
 
@@ -98,12 +98,12 @@ func (m *MockStateManager) GetState(targetName string) (*state.PoltergeistState,
 func (m *MockStateManager) GetAllStates() ([]*state.PoltergeistState, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	states := make([]*state.PoltergeistState, 0, len(m.states))
 	for _, state := range m.states {
 		states = append(states, state)
 	}
-	
+
 	return states, nil
 }
 
@@ -169,10 +169,10 @@ func (m *MockBuilder) Validate() error {
 func (m *MockBuilder) Build(ctx context.Context, changedFiles []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.buildCallCount++
 	m.lastBuildFiles = changedFiles
-	
+
 	return m.buildError
 }
 
@@ -180,7 +180,7 @@ func (m *MockBuilder) Build(ctx context.Context, changedFiles []string) error {
 func (m *MockBuilder) Clean() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.cleanCallCount++
 	return m.cleanError
 }
@@ -260,7 +260,7 @@ func (f *MockBuilderFactory) CreateBuilder(target types.Target, projectRoot stri
 	if builder, ok := f.builders[target.GetName()]; ok {
 		return builder
 	}
-	
+
 	return NewMockBuilder()
 }
 
@@ -290,7 +290,7 @@ func (m *MockWatchmanClient) Connect(ctx context.Context) error {
 	if m.connectError != nil {
 		return m.connectError
 	}
-	
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.connected = true
@@ -327,7 +327,7 @@ func (m *MockWatchmanClient) Subscribe(
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.subscriptions[name] = callback
 	return nil
 }
@@ -336,7 +336,7 @@ func (m *MockWatchmanClient) Subscribe(
 func (m *MockWatchmanClient) Unsubscribe(path string, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	delete(m.subscriptions, name)
 	return nil
 }
@@ -346,7 +346,7 @@ func (m *MockWatchmanClient) TriggerFileChange(subscriptionName string, files []
 	m.mu.RLock()
 	callback, ok := m.subscriptions[subscriptionName]
 	m.mu.RUnlock()
-	
+
 	if ok && callback != nil {
 		callback(files)
 	}

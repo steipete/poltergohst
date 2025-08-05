@@ -27,11 +27,11 @@ func NewXcodeHelper(projectRoot string) *XcodeHelper {
 
 // XcodeProject represents an Xcode project
 type XcodeProject struct {
-	Path     string
-	Name     string
-	Targets  []XcodeTarget
-	Schemes  []XcodeScheme
-	WorkDir  string
+	Path    string
+	Name    string
+	Targets []XcodeTarget
+	Schemes []XcodeScheme
+	WorkDir string
 }
 
 // XcodeTarget represents an Xcode target
@@ -46,10 +46,10 @@ type XcodeTarget struct {
 
 // XcodeScheme represents an Xcode scheme
 type XcodeScheme struct {
-	Name      string
-	Target    string
+	Name        string
+	Target      string
 	BuildConfig string
-	IsShared  bool
+	IsShared    bool
 }
 
 // BuildSettings represents Xcode build settings
@@ -399,7 +399,7 @@ func (h *XcodeHelper) getProjectName(projectPath string) string {
 
 func (h *XcodeHelper) getTargetsFromXcodebuild(projectPath string) ([]XcodeTarget, error) {
 	args := []string{"-list", "-json"}
-	
+
 	if strings.HasSuffix(projectPath, ".xcworkspace") {
 		args = append(args, "-workspace", projectPath)
 	} else {
@@ -439,7 +439,7 @@ func (h *XcodeHelper) getTargetsFromXcodebuild(projectPath string) ([]XcodeTarge
 
 func (h *XcodeHelper) getSchemesFromXcodebuild(projectPath string) ([]XcodeScheme, error) {
 	args := []string{"-list", "-json"}
-	
+
 	if strings.HasSuffix(projectPath, ".xcworkspace") {
 		args = append(args, "-workspace", projectPath)
 	} else {

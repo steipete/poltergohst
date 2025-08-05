@@ -19,12 +19,12 @@ func NewPatternMatcher(patterns []string) (*PatternMatcher, error) {
 	for _, pattern := range patterns {
 		expandedPatterns = append(expandedPatterns, ExpandPattern(pattern)...)
 	}
-	
+
 	pm := &PatternMatcher{
 		patterns: expandedPatterns,
 		regexps:  make([]*regexp.Regexp, 0, len(expandedPatterns)),
 	}
-	
+
 	for _, pattern := range expandedPatterns {
 		regex, err := pm.globToRegex(pattern)
 		if err != nil {
@@ -32,7 +32,7 @@ func NewPatternMatcher(patterns []string) (*PatternMatcher, error) {
 		}
 		pm.regexps = append(pm.regexps, regex)
 	}
-	
+
 	return pm, nil
 }
 
@@ -40,13 +40,13 @@ func NewPatternMatcher(patterns []string) (*PatternMatcher, error) {
 func (pm *PatternMatcher) Match(path string) bool {
 	// Normalize path separators
 	path = filepath.ToSlash(path)
-	
+
 	for _, regex := range pm.regexps {
 		if regex.MatchString(path) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -75,11 +75,11 @@ func (pm *PatternMatcher) GetMatchingPaths(paths []string) []string {
 func (pm *PatternMatcher) globToRegex(pattern string) (*regexp.Regexp, error) {
 	// Normalize pattern
 	pattern = filepath.ToSlash(pattern)
-	
+
 	// Escape regex special characters except glob wildcards
 	var regex strings.Builder
 	regex.WriteString("^")
-	
+
 	i := 0
 	for i < len(pattern) {
 		switch pattern[i] {
@@ -111,7 +111,7 @@ func (pm *PatternMatcher) globToRegex(pattern string) (*regexp.Regexp, error) {
 			} else {
 				regex.WriteString("[")
 			}
-			
+
 			for j < len(pattern) && pattern[j] != ']' {
 				if pattern[j] == '\\' && j+1 < len(pattern) {
 					regex.WriteByte(pattern[j])
@@ -122,7 +122,7 @@ func (pm *PatternMatcher) globToRegex(pattern string) (*regexp.Regexp, error) {
 					j++
 				}
 			}
-			
+
 			if j < len(pattern) {
 				regex.WriteByte(']')
 				i = j + 1
@@ -151,9 +151,9 @@ func (pm *PatternMatcher) globToRegex(pattern string) (*regexp.Regexp, error) {
 			i++
 		}
 	}
-	
+
 	regex.WriteString("$")
-	
+
 	return regexp.Compile(regex.String())
 }
 
@@ -166,20 +166,20 @@ func IsGlobPattern(pattern string) bool {
 func NormalizePattern(pattern string) string {
 	// Convert backslashes to forward slashes (for Windows compatibility)
 	pattern = strings.ReplaceAll(pattern, "\\", "/")
-	
+
 	// Remove leading ./
 	pattern = strings.TrimPrefix(pattern, "./")
-	
+
 	// Remove trailing /
 	pattern = strings.TrimSuffix(pattern, "/")
-	
+
 	return pattern
 }
 
 // ExpandPattern expands a pattern to include common variations
 func ExpandPattern(pattern string) []string {
 	patterns := []string{pattern}
-	
+
 	// If pattern is a directory (no wildcards or file extensions), add /**/* for contents
 	if !strings.Contains(pattern, "*") && !strings.Contains(pattern, ".") {
 		patterns = append(patterns, pattern+"/**/*")
@@ -187,7 +187,7 @@ func ExpandPattern(pattern string) []string {
 		// For file patterns, add ** prefix for recursive matching
 		patterns = append(patterns, "**/"+pattern)
 	}
-	
+
 	return patterns
 }
 
@@ -201,19 +201,19 @@ type ExclusionMatcher struct {
 func NewExclusionMatcher(patterns []string) (*ExclusionMatcher, error) {
 	// Add common exclusion patterns
 	allPatterns := append([]string{}, patterns...)
-	
+
 	// Convert directory names to patterns
 	for i, pattern := range allPatterns {
 		if !strings.Contains(pattern, "*") && !strings.Contains(pattern, "/") {
 			allPatterns[i] = "**/" + pattern + "/**"
 		}
 	}
-	
+
 	matcher, err := NewPatternMatcher(allPatterns)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &ExclusionMatcher{
 		patterns: patterns,
 		matcher:  matcher,
@@ -282,12 +282,12 @@ func MatchGlob(pattern, path string) (bool, error) {
 	if !strings.Contains(pattern, "**") {
 		return filepath.Match(pattern, path)
 	}
-	
+
 	// For ** patterns, use custom matcher
 	matcher, err := NewPatternMatcher([]string{pattern})
 	if err != nil {
 		return false, err
 	}
-	
+
 	return matcher.Match(path), nil
 }

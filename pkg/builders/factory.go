@@ -26,34 +26,34 @@ func (f *BuilderFactory) CreateBuilder(
 	switch target.GetType() {
 	case types.TargetTypeExecutable:
 		return NewExecutableBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeAppBundle:
 		return NewAppBundleBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeLibrary:
 		return NewLibraryBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeFramework:
 		return NewFrameworkBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeTest:
 		return NewTestBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeDocker:
 		return NewDockerBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeCMakeExecutable:
 		return NewCMakeExecutableBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeCMakeLibrary:
 		return NewCMakeLibraryBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeCMakeCustom:
 		return NewCMakeCustomBuilder(target, projectRoot, log, stateManager)
-		
+
 	case types.TargetTypeCustom:
 		return NewCustomBuilder(target, projectRoot, log, stateManager)
-		
+
 	default:
 		// Fallback to base builder
 		return NewBaseBuilder(target, projectRoot, log, stateManager)
@@ -75,17 +75,17 @@ func NewFrameworkBuilder(
 	stateManager interfaces.StateManager,
 ) *FrameworkBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &FrameworkBuilder{
 		BaseBuilder: base,
 	}
-	
+
 	// Extract framework specific fields
 	if fwTarget, ok := target.(*types.FrameworkTarget); ok {
 		builder.outputPath = fwTarget.OutputPath
 		builder.platform = fwTarget.Platform
 	}
-	
+
 	return builder
 }
 
@@ -103,16 +103,16 @@ func NewCustomBuilder(
 	stateManager interfaces.StateManager,
 ) *CustomBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &CustomBuilder{
 		BaseBuilder: base,
 	}
-	
+
 	// Extract custom config
 	if customTarget, ok := target.(*types.CustomTarget); ok {
 		builder.config = customTarget.Config
 	}
-	
+
 	return builder
 }
 
@@ -134,7 +134,7 @@ func NewCMakeBuilder(
 	stateManager interfaces.StateManager,
 ) *CMakeBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	return &CMakeBuilder{
 		BaseBuilder: base,
 		generator:   "Unix Makefiles",
@@ -146,21 +146,21 @@ func NewCMakeBuilder(
 // configureCMake runs CMake configuration
 func (b *CMakeBuilder) configureCMake() error {
 	buildDir := b.resolvePath("build")
-	
+
 	// Create build directory
 	if err := b.ensureDirectory(buildDir); err != nil {
 		return fmt.Errorf("failed to create build directory: %w", err)
 	}
-	
+
 	// Build CMake command
 	cmakeCmd := fmt.Sprintf("cmake -S . -B build -G \"%s\" -DCMAKE_BUILD_TYPE=%s",
 		b.generator, b.buildType)
-	
+
 	// Add custom arguments
 	for _, arg := range b.cmakeArgs {
 		cmakeCmd += " " + arg
 	}
-	
+
 	// Override build command temporarily
 	originalCmd := b.Target.GetBuildCommand()
 	defer func() {
@@ -174,7 +174,7 @@ func (b *CMakeBuilder) configureCMake() error {
 			t.BuildCommand = originalCmd
 		}
 	}()
-	
+
 	// Set configure command
 	switch t := b.Target.(type) {
 	case *types.CMakeExecutableTarget:
@@ -184,7 +184,7 @@ func (b *CMakeBuilder) configureCMake() error {
 	case *types.CMakeCustomTarget:
 		t.BuildCommand = cmakeCmd
 	}
-	
+
 	// Run configuration
 	return b.BaseBuilder.Build(nil, nil)
 }
@@ -208,11 +208,11 @@ func NewCMakeExecutableBuilder(
 	stateManager interfaces.StateManager,
 ) *CMakeExecutableBuilder {
 	base := NewCMakeBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &CMakeExecutableBuilder{
 		CMakeBuilder: base,
 	}
-	
+
 	// Extract CMake executable specific fields
 	if cmakeTarget, ok := target.(*types.CMakeExecutableTarget); ok {
 		if cmakeTarget.Generator != "" {
@@ -228,7 +228,7 @@ func NewCMakeExecutableBuilder(
 			builder.parallel = *cmakeTarget.Parallel
 		}
 	}
-	
+
 	return builder
 }
 
@@ -247,11 +247,11 @@ func NewCMakeLibraryBuilder(
 	stateManager interfaces.StateManager,
 ) *CMakeLibraryBuilder {
 	base := NewCMakeBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &CMakeLibraryBuilder{
 		CMakeBuilder: base,
 	}
-	
+
 	// Extract CMake library specific fields
 	if cmakeTarget, ok := target.(*types.CMakeLibraryTarget); ok {
 		if cmakeTarget.Generator != "" {
@@ -268,7 +268,7 @@ func NewCMakeLibraryBuilder(
 			builder.parallel = *cmakeTarget.Parallel
 		}
 	}
-	
+
 	return builder
 }
 
@@ -285,11 +285,11 @@ func NewCMakeCustomBuilder(
 	stateManager interfaces.StateManager,
 ) *CMakeCustomBuilder {
 	base := NewCMakeBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &CMakeCustomBuilder{
 		CMakeBuilder: base,
 	}
-	
+
 	// Extract CMake custom specific fields
 	if cmakeTarget, ok := target.(*types.CMakeCustomTarget); ok {
 		if cmakeTarget.Generator != "" {
@@ -304,6 +304,6 @@ func NewCMakeCustomBuilder(
 			builder.parallel = *cmakeTarget.Parallel
 		}
 	}
-	
+
 	return builder
 }

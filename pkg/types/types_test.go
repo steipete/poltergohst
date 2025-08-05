@@ -117,12 +117,12 @@ func TestParseTarget(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target, err := types.ParseTarget([]byte(tt.json))
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseTarget() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr && tt.check != nil {
 				tt.check(t, target)
 			}
@@ -138,25 +138,25 @@ func TestTargetDefaults(t *testing.T) {
 		"watchPaths": ["src"],
 		"outputPath": "out"
 	}`
-	
+
 	target, err := types.ParseTarget([]byte(json))
 	if err != nil {
 		t.Fatalf("failed to parse target: %v", err)
 	}
-	
+
 	// Test default values
 	if target.GetSettlingDelay() != 1000 {
 		t.Errorf("expected default settling delay 1000, got %d", target.GetSettlingDelay())
 	}
-	
+
 	if target.GetMaxRetries() != 3 {
 		t.Errorf("expected default max retries 3, got %d", target.GetMaxRetries())
 	}
-	
+
 	if target.GetBackoffMultiplier() != 2.0 {
 		t.Errorf("expected default backoff multiplier 2.0, got %f", target.GetBackoffMultiplier())
 	}
-	
+
 	if target.GetDebounceInterval() != 100 {
 		t.Errorf("expected default debounce interval 100, got %d", target.GetDebounceInterval())
 	}
@@ -181,25 +181,25 @@ func TestPoltergeistConfig(t *testing.T) {
 			"settlingDelay": 500
 		}
 	}`
-	
+
 	var config types.PoltergeistConfig
 	err := json.Unmarshal([]byte(configJSON), &config)
 	if err != nil {
 		t.Fatalf("failed to unmarshal config: %v", err)
 	}
-	
+
 	if config.Version != "1.0" {
 		t.Errorf("expected version 1.0, got %s", config.Version)
 	}
-	
+
 	if config.ProjectType != types.ProjectType("go") {
 		t.Errorf("expected project type go, got %s", config.ProjectType)
 	}
-	
+
 	if len(config.Targets) != 1 {
 		t.Errorf("expected 1 target, got %d", len(config.Targets))
 	}
-	
+
 	if config.Watchman == nil {
 		t.Error("expected watchman config to be set")
 	} else {
@@ -218,20 +218,20 @@ func TestBuildStatus(t *testing.T) {
 		types.BuildStatusFailed,
 		types.BuildStatusCancelled,
 	}
-	
+
 	for _, status := range statuses {
 		// Ensure status can be marshaled/unmarshaled
 		data, err := json.Marshal(status)
 		if err != nil {
 			t.Errorf("failed to marshal status %s: %v", status, err)
 		}
-		
+
 		var unmarshaled types.BuildStatus
 		err = json.Unmarshal(data, &unmarshaled)
 		if err != nil {
 			t.Errorf("failed to unmarshal status: %v", err)
 		}
-		
+
 		if unmarshaled != status {
 			t.Errorf("status mismatch: expected %s, got %s", status, unmarshaled)
 		}
@@ -246,7 +246,7 @@ func BenchmarkParseTarget(b *testing.B) {
 		"watchPaths": ["*.go"],
 		"outputPath": "bench"
 	}`)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := types.ParseTarget(json)

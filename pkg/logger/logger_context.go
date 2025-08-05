@@ -2,7 +2,7 @@ package logger
 
 import (
 	"context"
-	
+
 	pcontext "github.com/poltergeist/poltergeist/pkg/context"
 )
 
@@ -60,29 +60,29 @@ func (l *TargetLogger) extractContextFields(ctx context.Context) []Field {
 	if ctx == nil {
 		return nil
 	}
-	
+
 	var fields []Field
-	
+
 	// Add request ID if present
 	if requestID := pcontext.GetRequestID(ctx); requestID != "unknown-request" {
 		fields = append(fields, WithField("request_id", requestID))
 	}
-	
+
 	// Add correlation ID if present
 	if correlationID := pcontext.GetCorrelationID(ctx); correlationID != "unknown-correlation" {
 		fields = append(fields, WithField("correlation_id", correlationID))
 	}
-	
+
 	// Add operation if present
 	if operation := pcontext.GetOperation(ctx); operation != "unknown-operation" {
 		fields = append(fields, WithField("operation", operation))
 	}
-	
+
 	// Add duration if start time is present
 	if duration := pcontext.GetDuration(ctx); duration > 0 {
 		fields = append(fields, WithField("duration_ms", duration.Milliseconds()))
 	}
-	
+
 	return fields
 }
 
@@ -91,7 +91,7 @@ func WithContext(ctx context.Context, logger Logger) Logger {
 	if ctx == nil {
 		return logger
 	}
-	
+
 	// Create a wrapper that automatically adds context fields
 	return &contextualLogger{
 		ctx:    ctx,

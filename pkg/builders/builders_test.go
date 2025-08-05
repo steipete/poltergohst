@@ -30,18 +30,18 @@ func (m *mockStateManager) UpdateState(targetName string, updates map[string]int
 func (m *mockStateManager) UpdateBuildStatus(targetName string, status types.BuildStatus) error {
 	return nil
 }
-func (m *mockStateManager) RemoveState(targetName string) error { return nil }
+func (m *mockStateManager) RemoveState(targetName string) error      { return nil }
 func (m *mockStateManager) IsLocked(targetName string) (bool, error) { return false, nil }
 func (m *mockStateManager) DiscoverStates() (map[string]*state.PoltergeistState, error) {
 	return nil, nil
 }
 func (m *mockStateManager) StartHeartbeat(ctx context.Context) {}
-func (m *mockStateManager) StopHeartbeat() {}
-func (m *mockStateManager) Cleanup() error { return nil }
+func (m *mockStateManager) StopHeartbeat()                     {}
+func (m *mockStateManager) Cleanup() error                     { return nil }
 
 func TestBaseBuilder_Validate(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	tests := []struct {
 		name    string
 		target  types.Target
@@ -86,7 +86,7 @@ func TestBaseBuilder_Validate(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := builders.NewBaseBuilder(tt.target, tmpDir, nil, nil)
@@ -100,7 +100,7 @@ func TestBaseBuilder_Validate(t *testing.T) {
 
 func TestExecutableBuilder(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a simple Go file to build
 	srcFile := filepath.Join(tmpDir, "main.go")
 	err := os.WriteFile(srcFile, []byte(`
@@ -111,7 +111,7 @@ func TestExecutableBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create source file: %v", err)
 	}
-	
+
 	target := &types.ExecutableTarget{
 		BaseTarget: types.BaseTarget{
 			Name:         "test-exe",
@@ -121,33 +121,33 @@ func TestExecutableBuilder(t *testing.T) {
 		},
 		OutputPath: "test",
 	}
-	
+
 	factory := builders.NewBuilderFactory()
 	builder := factory.CreateBuilder(target, tmpDir, nil, nil)
-	
+
 	// Validate
 	if err := builder.Validate(); err != nil {
 		t.Fatalf("validation failed: %v", err)
 	}
-	
+
 	// Build
 	ctx := context.Background()
 	err = builder.Build(ctx, []string{"main.go"})
 	if err != nil {
 		t.Fatalf("build failed: %v", err)
 	}
-	
+
 	// Check output exists
 	outputPath := filepath.Join(tmpDir, "test")
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
 		t.Error("expected output file to exist")
 	}
-	
+
 	// Check metrics
 	if builder.GetLastBuildTime() == 0 {
 		t.Error("expected non-zero build time")
 	}
-	
+
 	if builder.GetSuccessRate() != 1.0 {
 		t.Errorf("expected success rate 1.0, got %f", builder.GetSuccessRate())
 	}
@@ -156,7 +156,7 @@ func TestExecutableBuilder(t *testing.T) {
 func TestBuilderFactory_CreateBuilder(t *testing.T) {
 	factory := builders.NewBuilderFactory()
 	tmpDir := t.TempDir()
-	
+
 	tests := []struct {
 		name       string
 		targetType types.TargetType
@@ -224,14 +224,14 @@ func TestBuilderFactory_CreateBuilder(t *testing.T) {
 			wantType: "*builders.CMakeExecutableBuilder",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := factory.CreateBuilder(tt.target, tmpDir, nil, nil)
 			if builder == nil {
 				t.Fatal("expected builder, got nil")
 			}
-			
+
 			if builder.GetTarget() != tt.target {
 				t.Error("builder target mismatch")
 			}
@@ -241,10 +241,10 @@ func TestBuilderFactory_CreateBuilder(t *testing.T) {
 
 func TestAppBundleBuilder_AutoRelaunch(t *testing.T) {
 	t.Skip("Skipping platform-specific test")
-	
+
 	tmpDir := t.TempDir()
 	autoRelaunch := true
-	
+
 	target := &types.AppBundleTarget{
 		BaseTarget: types.BaseTarget{
 			Name:         "TestApp",
@@ -256,10 +256,10 @@ func TestAppBundleBuilder_AutoRelaunch(t *testing.T) {
 		AutoRelaunch:  &autoRelaunch,
 		LaunchCommand: "echo 'launching app'",
 	}
-	
+
 	factory := builders.NewBuilderFactory()
 	builder := factory.CreateBuilder(target, tmpDir, nil, nil)
-	
+
 	ctx := context.Background()
 	err := builder.Build(ctx, []string{"test.swift"})
 	if err != nil {
@@ -271,9 +271,9 @@ func TestDockerBuilder(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("Docker not available")
 	}
-	
+
 	tmpDir := t.TempDir()
-	
+
 	// Create a simple Dockerfile
 	dockerfile := filepath.Join(tmpDir, "Dockerfile")
 	err := os.WriteFile(dockerfile, []byte(`
@@ -283,7 +283,7 @@ func TestDockerBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create Dockerfile: %v", err)
 	}
-	
+
 	target := &types.DockerTarget{
 		BaseTarget: types.BaseTarget{
 			Name:         "test-image",
@@ -296,13 +296,13 @@ func TestDockerBuilder(t *testing.T) {
 		Context:    ".",
 		Tags:       []string{"latest", "test"},
 	}
-	
+
 	factory := builders.NewBuilderFactory()
 	builder := factory.CreateBuilder(target, tmpDir, nil, nil)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	err = builder.Build(ctx, []string{"Dockerfile"})
 	if err != nil {
 		t.Fatalf("docker build failed: %v", err)
@@ -313,9 +313,9 @@ func TestCMakeBuilder(t *testing.T) {
 	if _, err := exec.LookPath("cmake"); err != nil {
 		t.Skip("CMake not available")
 	}
-	
+
 	tmpDir := t.TempDir()
-	
+
 	// Create a simple CMakeLists.txt
 	cmakeFile := filepath.Join(tmpDir, "CMakeLists.txt")
 	err := os.WriteFile(cmakeFile, []byte(`
@@ -326,7 +326,7 @@ func TestCMakeBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create CMakeLists.txt: %v", err)
 	}
-	
+
 	// Create main.cpp
 	mainFile := filepath.Join(tmpDir, "main.cpp")
 	err = os.WriteFile(mainFile, []byte(`
@@ -339,7 +339,7 @@ func TestCMakeBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create main.cpp: %v", err)
 	}
-	
+
 	target := &types.CMakeExecutableTarget{
 		BaseTarget: types.BaseTarget{
 			Name:       "test-cmake",
@@ -350,10 +350,10 @@ func TestCMakeBuilder(t *testing.T) {
 		BuildType:  types.CMakeBuildTypeDebug,
 		Generator:  "Unix Makefiles",
 	}
-	
+
 	factory := builders.NewBuilderFactory()
 	builder := factory.CreateBuilder(target, tmpDir, nil, nil)
-	
+
 	ctx := context.Background()
 	err = builder.Build(ctx, []string{"main.cpp"})
 	if err != nil {
@@ -364,7 +364,7 @@ func TestCMakeBuilder(t *testing.T) {
 func TestBuilderConcurrency(t *testing.T) {
 	tmpDir := t.TempDir()
 	factory := builders.NewBuilderFactory()
-	
+
 	// Create multiple builders
 	var builders []interfaces.Builder
 	for i := 0; i < 5; i++ {
@@ -377,21 +377,21 @@ func TestBuilderConcurrency(t *testing.T) {
 			},
 			OutputPath: fmt.Sprintf("test-%d", i),
 		}
-		
+
 		builder := factory.CreateBuilder(target, tmpDir, nil, nil)
 		builders = append(builders, builder)
 	}
-	
+
 	// Build concurrently
 	ctx := context.Background()
 	errChan := make(chan error, len(builders))
-	
+
 	for _, builder := range builders {
 		go func(b interfaces.Builder) {
 			errChan <- b.Build(ctx, []string{"test.go"})
 		}(builder)
 	}
-	
+
 	// Wait for all builds
 	for range builders {
 		if err := <-errChan; err != nil {
@@ -403,7 +403,7 @@ func TestBuilderConcurrency(t *testing.T) {
 func TestBuilderRetry(t *testing.T) {
 	tmpDir := t.TempDir()
 	maxRetries := 3
-	
+
 	target := &types.ExecutableTarget{
 		BaseTarget: types.BaseTarget{
 			Name:         "test-retry",
@@ -414,14 +414,14 @@ func TestBuilderRetry(t *testing.T) {
 		},
 		OutputPath: "test",
 	}
-	
+
 	factory := builders.NewBuilderFactory()
 	builder := factory.CreateBuilder(target, tmpDir, nil, nil)
-	
+
 	// Override build to count retries
 	ctx := context.Background()
 	err := builder.Build(ctx, []string{"test.go"})
-	
+
 	// Should fail after retries
 	if err == nil {
 		t.Error("expected build to fail")
@@ -431,7 +431,7 @@ func TestBuilderRetry(t *testing.T) {
 func BenchmarkBuilderCreation(b *testing.B) {
 	factory := builders.NewBuilderFactory()
 	tmpDir := b.TempDir()
-	
+
 	target := &types.ExecutableTarget{
 		BaseTarget: types.BaseTarget{
 			Name:         "bench",
@@ -441,7 +441,7 @@ func BenchmarkBuilderCreation(b *testing.B) {
 		},
 		OutputPath: "bench",
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = factory.CreateBuilder(target, tmpDir, nil, nil)
@@ -450,7 +450,7 @@ func BenchmarkBuilderCreation(b *testing.B) {
 
 func BenchmarkBuilderBuild(b *testing.B) {
 	tmpDir := b.TempDir()
-	
+
 	target := &types.ExecutableTarget{
 		BaseTarget: types.BaseTarget{
 			Name:         "bench",
@@ -460,11 +460,11 @@ func BenchmarkBuilderBuild(b *testing.B) {
 		},
 		OutputPath: "bench",
 	}
-	
+
 	factory := builders.NewBuilderFactory()
 	builder := factory.CreateBuilder(target, tmpDir, nil, nil)
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = builder.Build(ctx, []string{"test.go"})

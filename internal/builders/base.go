@@ -22,7 +22,7 @@ type BaseBuilder struct {
 	ProjectRoot  string
 	Logger       logger.Logger
 	StateManager interfaces.StateManager
-	
+
 	lastBuildTime time.Duration
 	totalBuilds   int
 	successBuilds int
@@ -40,7 +40,7 @@ func NewBaseBuilder(
 	if log != nil {
 		targetLogger = log.WithTarget(target.GetName())
 	}
-	
+
 	return &BaseBuilder{
 		Target:       target,
 		ProjectRoot:  projectRoot,
@@ -55,17 +55,17 @@ func (b *BaseBuilder) Validate() error {
 	if _, err := os.Stat(b.ProjectRoot); os.IsNotExist(err) {
 		return fmt.Errorf("project root does not exist: %s", b.ProjectRoot)
 	}
-	
+
 	// Validate watch paths
 	if len(b.Target.GetWatchPaths()) == 0 {
 		return fmt.Errorf("no watch paths defined for target %s", b.Target.GetName())
 	}
-	
+
 	// Validate build command
 	if b.Target.GetBuildCommand() == "" {
 		return fmt.Errorf("no build command defined for target %s", b.Target.GetName())
 	}
-	
+
 	return nil
 }
 
@@ -78,14 +78,14 @@ func (b *BaseBuilder) Build(ctx context.Context, changedFiles []string) error {
 		b.totalBuilds++
 		b.mu.Unlock()
 	}()
-	
+
 	if b.Logger != nil {
 		b.Logger.Info(fmt.Sprintf("Building with %d changed files", len(changedFiles)))
 	}
-	
+
 	// Execute build command
 	cmd := b.createCommand(ctx, b.Target.GetBuildCommand())
-	
+
 	// Set environment variables
 	if env := b.Target.GetEnvironment(); env != nil {
 		cmd.Env = os.Environ()
@@ -93,34 +93,34 @@ func (b *BaseBuilder) Build(ctx context.Context, changedFiles []string) error {
 			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 		}
 	}
-	
+
 	// Set working directory
 	cmd.Dir = b.ProjectRoot
-	
+
 	// Capture output
 	output, err := cmd.CombinedOutput()
-	
+
 	if err != nil {
 		if b.Logger != nil {
-			b.Logger.Error("Build failed", 
+			b.Logger.Error("Build failed",
 				logger.WithField("error", err),
 				logger.WithField("output", string(output)))
 		}
 		return fmt.Errorf("build failed: %w\n%s", err, output)
 	}
-	
+
 	b.mu.Lock()
 	b.successBuilds++
 	b.mu.Unlock()
-	
+
 	if b.Logger != nil {
 		b.Logger.Success(fmt.Sprintf("Build completed in %s", time.Since(startTime)))
-		
+
 		if len(output) > 0 {
 			b.Logger.Debug("Build output", logger.WithField("output", string(output)))
 		}
 	}
-	
+
 	return nil
 }
 
@@ -146,11 +146,11 @@ func (b *BaseBuilder) GetLastBuildTime() time.Duration {
 func (b *BaseBuilder) GetSuccessRate() float64 {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	
+
 	if b.totalBuilds == 0 {
 		return 1.0
 	}
-	
+
 	return float64(b.successBuilds) / float64(b.totalBuilds)
 }
 
@@ -158,8 +158,8 @@ func (b *BaseBuilder) GetSuccessRate() float64 {
 func (b *BaseBuilder) createCommand(ctx context.Context, command string) *exec.Cmd {
 	// Parse command with shell
 	var cmd *exec.Cmd
-	if strings.Contains(command, "&&") || strings.Contains(command, "||") || 
-	   strings.Contains(command, "|") || strings.Contains(command, ";") {
+	if strings.Contains(command, "&&") || strings.Contains(command, "||") ||
+		strings.Contains(command, "|") || strings.Contains(command, ";") {
 		// Complex command - use shell
 		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	} else {
@@ -171,7 +171,7 @@ func (b *BaseBuilder) createCommand(ctx context.Context, command string) *exec.C
 			cmd = exec.CommandContext(ctx, "sh", "-c", command)
 		}
 	}
-	
+
 	return cmd
 }
 
@@ -203,13 +203,13 @@ func NewExecutableBuilder(
 	stateManager interfaces.StateManager,
 ) *ExecutableBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	// Extract output path
 	outputPath := ""
 	if execTarget, ok := target.(*types.ExecutableTarget); ok {
 		outputPath = execTarget.OutputPath
 	}
-	
+
 	return &ExecutableBuilder{
 		BaseBuilder: base,
 		outputPath:  outputPath,
@@ -221,11 +221,11 @@ func (b *ExecutableBuilder) Validate() error {
 	if err := b.BaseBuilder.Validate(); err != nil {
 		return err
 	}
-	
+
 	if b.outputPath == "" {
 		return fmt.Errorf("output path not specified for executable target %s", b.Target.GetName())
 	}
-	
+
 	return nil
 }
 
@@ -240,24 +240,24 @@ func (b *ExecutableBuilder) Build(ctx context.Context, changedFiles []string) er
 			}
 		}
 	}
-	
+
 	// Run the build
 	if err := b.BaseBuilder.Build(ctx, changedFiles); err != nil {
 		return err
 	}
-	
+
 	// Verify output was created
 	if !b.fileExists(outputPath) {
 		return fmt.Errorf("build succeeded but output not found: %s", outputPath)
 	}
-	
+
 	// Make executable
 	if err := os.Chmod(outputPath, 0755); err != nil {
 		if b.Logger != nil {
 			b.Logger.Warn("Failed to make output executable", logger.WithField("error", err))
 		}
 	}
-	
+
 	return nil
 }
 
@@ -278,11 +278,11 @@ func NewAppBundleBuilder(
 	stateManager interfaces.StateManager,
 ) *AppBundleBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &AppBundleBuilder{
 		BaseBuilder: base,
 	}
-	
+
 	// Extract app bundle specific fields
 	if appTarget, ok := target.(*types.AppBundleTarget); ok {
 		builder.bundleID = appTarget.BundleID
@@ -292,7 +292,7 @@ func NewAppBundleBuilder(
 		}
 		builder.launchCommand = appTarget.LaunchCommand
 	}
-	
+
 	return builder
 }
 
@@ -302,12 +302,12 @@ func (b *AppBundleBuilder) Build(ctx context.Context, changedFiles []string) err
 	if b.autoRelaunch {
 		b.killRunningApp()
 	}
-	
+
 	// Run the build
 	if err := b.BaseBuilder.Build(ctx, changedFiles); err != nil {
 		return err
 	}
-	
+
 	// Relaunch app if enabled
 	if b.autoRelaunch && b.launchCommand != "" {
 		if err := b.launchApp(ctx); err != nil {
@@ -316,7 +316,7 @@ func (b *AppBundleBuilder) Build(ctx context.Context, changedFiles []string) err
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -324,7 +324,7 @@ func (b *AppBundleBuilder) killRunningApp() {
 	if b.bundleID == "" {
 		return
 	}
-	
+
 	// Use pkill or killall to terminate app by bundle ID
 	cmd := exec.Command("pkill", "-f", b.bundleID)
 	if err := cmd.Run(); err != nil {
@@ -338,17 +338,17 @@ func (b *AppBundleBuilder) launchApp(ctx context.Context) error {
 	if b.launchCommand == "" {
 		return nil
 	}
-	
+
 	cmd := b.createCommand(ctx, b.launchCommand)
-	
+
 	// Run in background
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to launch app: %w", err)
 	}
-	
+
 	// Detach from process
 	go cmd.Wait()
-	
+
 	if b.Logger != nil {
 		b.Logger.Info("App relaunched successfully")
 	}
@@ -370,17 +370,17 @@ func NewLibraryBuilder(
 	stateManager interfaces.StateManager,
 ) *LibraryBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &LibraryBuilder{
 		BaseBuilder: base,
 	}
-	
+
 	// Extract library specific fields
 	if libTarget, ok := target.(*types.LibraryTarget); ok {
 		builder.outputPath = libTarget.OutputPath
 		builder.libraryType = libTarget.LibraryType
 	}
-	
+
 	return builder
 }
 
@@ -401,13 +401,13 @@ func NewDockerBuilder(
 	stateManager interfaces.StateManager,
 ) *DockerBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &DockerBuilder{
 		BaseBuilder: base,
 		context:     ".",
 		dockerfile:  "Dockerfile",
 	}
-	
+
 	// Extract Docker specific fields
 	if dockerTarget, ok := target.(*types.DockerTarget); ok {
 		builder.imageName = dockerTarget.ImageName
@@ -419,7 +419,7 @@ func NewDockerBuilder(
 		}
 		builder.tags = dockerTarget.Tags
 	}
-	
+
 	return builder
 }
 
@@ -427,25 +427,25 @@ func NewDockerBuilder(
 func (b *DockerBuilder) Build(ctx context.Context, changedFiles []string) error {
 	// Build the Docker image with proper tags
 	buildCmd := fmt.Sprintf("docker build -f %s -t %s", b.dockerfile, b.imageName)
-	
+
 	// Add additional tags
 	for _, tag := range b.tags {
 		buildCmd += fmt.Sprintf(" -t %s:%s", b.imageName, tag)
 	}
-	
+
 	// Add context
 	buildCmd += fmt.Sprintf(" %s", b.context)
-	
+
 	// Override the build command
 	originalCmd := b.Target.GetBuildCommand()
 	b.Target.(*types.DockerTarget).BuildCommand = buildCmd
-	
+
 	// Run the build
 	err := b.BaseBuilder.Build(ctx, changedFiles)
-	
+
 	// Restore original command
 	b.Target.(*types.DockerTarget).BuildCommand = originalCmd
-	
+
 	return err
 }
 
@@ -464,17 +464,17 @@ func NewTestBuilder(
 	stateManager interfaces.StateManager,
 ) *TestBuilder {
 	base := NewBaseBuilder(target, projectRoot, log, stateManager)
-	
+
 	builder := &TestBuilder{
 		BaseBuilder: base,
 	}
-	
+
 	// Extract test specific fields
 	if testTarget, ok := target.(*types.TestTarget); ok {
 		builder.testCommand = testTarget.TestCommand
 		builder.coverageFile = testTarget.CoverageFile
 	}
-	
+
 	return builder
 }
 
@@ -485,22 +485,22 @@ func (b *TestBuilder) Build(ctx context.Context, changedFiles []string) error {
 	if b.testCommand != "" {
 		b.Target.(*types.TestTarget).BuildCommand = b.testCommand
 	}
-	
+
 	// Run the tests
 	err := b.BaseBuilder.Build(ctx, changedFiles)
-	
+
 	// Restore original command
 	b.Target.(*types.TestTarget).BuildCommand = originalCmd
-	
+
 	// Check coverage file if specified
 	if err == nil && b.coverageFile != "" {
 		if b.fileExists(b.coverageFile) {
 			if b.Logger != nil {
-				b.Logger.Info("Coverage report generated", 
+				b.Logger.Info("Coverage report generated",
 					logger.WithField("file", b.coverageFile))
 			}
 		}
 	}
-	
+
 	return err
 }

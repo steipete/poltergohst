@@ -42,12 +42,12 @@ This command is useful in CI/CD pipelines to wait for builds to complete.`,
 
 // WaitResult represents the result of waiting for a target
 type WaitResult struct {
-	Target    string
-	Status    types.BuildStatus
-	Duration  time.Duration
-	Success   bool
-	TimedOut  bool
-	Error     error
+	Target   string
+	Status   types.BuildStatus
+	Duration time.Duration
+	Success  bool
+	TimedOut bool
+	Error    error
 }
 
 // runWait waits for targets to reach the specified status
@@ -183,7 +183,7 @@ func waitForTargets(ctx context.Context, sm *state.StateManager, targetNames []s
 					printSuccess(fmt.Sprintf("Target '%s' reached status '%s'", targetName, targetStatus))
 				} else {
 					allCompleted = false
-					
+
 					// Print periodic status updates
 					if int(time.Since(startTime).Seconds())%10 == 0 {
 						printInfo(fmt.Sprintf("Target '%s' status: %s (waiting for %s)", targetName, currentState.BuildStatus, targetStatus))
