@@ -170,8 +170,8 @@ func runStatus() error {
 
 	// Print status table
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "TARGET\tSTATUS\tLAST BUILD\tBUILDS\tFAILURES")
-	fmt.Fprintln(w, "------\t------\t----------\t------\t--------")
+	_, _ = fmt.Fprintln(w, "TARGET\tSTATUS\tLAST BUILD\tBUILDS\tFAILURES")
+	_, _ = fmt.Fprintln(w, "------\t------\t----------\t------\t--------")
 
 	for _, rawTarget := range cfg.Targets {
 		target, err := types.ParseTarget(rawTarget)
@@ -204,7 +204,7 @@ func runStatus() error {
 			statusColor = color.YellowString(status)
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n",
 			target.GetName(),
 			statusColor,
 			lastBuild,
@@ -213,7 +213,7 @@ func runStatus() error {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 	return nil
 }
 
@@ -228,8 +228,8 @@ func runList() error {
 
 	// Print targets table
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tTYPE\tENABLED\tWATCH PATHS")
-	fmt.Fprintln(w, "----\t----\t-------\t-----------")
+	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tENABLED\tWATCH PATHS")
+	_, _ = fmt.Fprintln(w, "----\t----\t-------\t-----------")
 
 	for _, rawTarget := range cfg.Targets {
 		target, err := types.ParseTarget(rawTarget)
@@ -250,7 +250,7 @@ func runList() error {
 			}
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			target.GetName(),
 			target.GetType(),
 			enabled,
@@ -258,7 +258,7 @@ func runList() error {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 	return nil
 }
 

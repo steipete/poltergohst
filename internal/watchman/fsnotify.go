@@ -189,7 +189,7 @@ func (f *FSNotifyWatcher) processEvents() {
 			// Handle directory creation - add to watcher
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					f.addDirectory(event.Name)
+					_ = f.addDirectory(event.Name)
 				}
 			}
 

@@ -393,7 +393,7 @@ func TestWatchmanClient_Reconnect(t *testing.T) {
 	client := watchman.NewClient(log)
 
 	// Simulate connection failure and reconnect
-	client.Disconnect()
+	_ = client.Disconnect()
 
 	// Should reconnect automatically on next operation
 	version, err := client.GetVersion()

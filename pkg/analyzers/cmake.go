@@ -245,7 +245,7 @@ func (a *CMakeAnalyzer) analyzeMainCMakeFile(path string, project *CMakeProject)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	projectNameRegex := regexp.MustCompile(`^\s*project\s*\(\s*([^)\s]+)`)
@@ -278,7 +278,7 @@ func (a *CMakeAnalyzer) analyzeCMakeFile(path string, project *CMakeProject, opt
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 

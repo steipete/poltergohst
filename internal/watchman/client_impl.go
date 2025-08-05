@@ -60,7 +60,7 @@ func NewUnifiedClient(log logger.Logger, config *types.WatchmanConfig) *UnifiedC
 			client.useWatchman = true
 			log.Info(fmt.Sprintf("Connected to Watchman version %s", version))
 		} else {
-			conn.Close()
+			_ = conn.Close()
 			log.Info("Watchman connection failed, using fsnotify fallback")
 		}
 	} else {

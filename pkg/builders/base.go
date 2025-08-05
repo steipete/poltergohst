@@ -90,7 +90,7 @@ func (b *BaseBuilder) Build(ctx context.Context, changedFiles []string) error {
 	}
 	defer func() {
 		if logFile != nil {
-			logFile.Close()
+			_ = logFile.Close()
 		}
 	}()
 
@@ -252,7 +252,7 @@ func (b *BaseBuilder) prepareLogFile() (*os.File, error) {
 // logToFile writes a message to the log file if available
 func (b *BaseBuilder) logToFile(logFile *os.File, message string) {
 	if logFile != nil {
-		logFile.WriteString(message)
+		_, _ = logFile.WriteString(message)
 	}
 }
 
@@ -397,7 +397,7 @@ func (b *AppBundleBuilder) killRunningApp() {
 	if err := cmd.Run(); err != nil {
 		// Try alternative methods
 		cmd = exec.Command("killall", "-9", b.bundleID)
-		cmd.Run() // Ignore error - app might not be running
+		_ = cmd.Run() // Ignore error - app might not be running
 	}
 }
 

@@ -336,7 +336,7 @@ func TestStateManager_Cleanup(t *testing.T) {
 
 	for _, target := range targets {
 		_, _ = sm.InitializeState(target)
-		sm.UpdateBuildStatus(target.GetName(), types.BuildStatusBuilding)
+		_ = sm.UpdateBuildStatus(target.GetName(), types.BuildStatusBuilding)
 	}
 
 	// Cleanup
@@ -377,7 +377,7 @@ func TestStateManager_Concurrency(t *testing.T) {
 				updates := map[string]interface{}{
 					"buildCount": id*10 + j,
 				}
-				sm.UpdateState("test", updates)
+				_ = sm.UpdateState("test", updates)
 			}
 		}(i)
 	}
@@ -473,6 +473,6 @@ func BenchmarkStateManager_ReadState(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sm.ReadState("bench")
+		_, _ = sm.ReadState("bench")
 	}
 }

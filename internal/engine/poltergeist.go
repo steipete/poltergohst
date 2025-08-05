@@ -248,7 +248,7 @@ func (p *Poltergeist) start(targetName string) error {
 	if p.processManager != nil {
 		p.processManager.RegisterShutdownHandler(func() {
 			p.Stop()
-			p.Cleanup()
+			_ = p.Cleanup()
 		})
 		p.processManager.Start(p.ctx)
 	}
@@ -500,7 +500,7 @@ func (p *Poltergeist) handleFileChanges(files []interfaces.FileChange, targetNam
 		// Set new timer with settling delay
 		delay := time.Duration(state.Target.GetSettlingDelay()) * time.Millisecond
 		state.BuildTimer = time.AfterFunc(delay, func() {
-			p.buildTarget(targetName)
+			_ = p.buildTarget(targetName)
 		})
 		state.mu.Unlock()
 	}
@@ -602,7 +602,7 @@ func (p *Poltergeist) buildTarget(targetName string) error {
 
 	// Update build status and notify
 	if err != nil {
-		p.stateManager.UpdateBuildStatus(targetName, types.BuildStatusFailed)
+		_ = p.stateManager.UpdateBuildStatus(targetName, types.BuildStatusFailed)
 		if p.notifier != nil {
 			p.notifier.NotifyBuildFailure(targetName, err)
 		}

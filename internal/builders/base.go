@@ -330,7 +330,7 @@ func (b *AppBundleBuilder) killRunningApp() {
 	if err := cmd.Run(); err != nil {
 		// Try alternative methods
 		cmd = exec.Command("killall", "-9", b.bundleID)
-		cmd.Run() // Ignore error - app might not be running
+		_ = cmd.Run() // Ignore error - app might not be running
 	}
 }
 
@@ -347,7 +347,9 @@ func (b *AppBundleBuilder) launchApp(ctx context.Context) error {
 	}
 
 	// Detach from process
-	go cmd.Wait()
+	go func() {
+		_ = cmd.Wait()
+	}()
 
 	if b.Logger != nil {
 		b.Logger.Info("App relaunched successfully")

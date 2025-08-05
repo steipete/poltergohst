@@ -705,7 +705,7 @@ add_library(lib_core_utils STATIC utils.cpp)`,
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up and create new CMakeLists.txt
 			cmakeFile := filepath.Join(tempDir, "CMakeLists.txt")
-			os.Remove(cmakeFile)
+			_ = os.Remove(cmakeFile)
 
 			err := os.WriteFile(cmakeFile, []byte(tt.cmakeContent), 0644)
 			if err != nil {

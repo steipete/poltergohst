@@ -374,7 +374,7 @@ func (sm *StateManager) saveStateFile(state *PoltergeistState) error {
 	}
 
 	if err := os.Rename(tempFile, stateFile); err != nil {
-		os.Remove(tempFile) // Clean up
+		_ = os.Remove(tempFile) // Clean up
 		return fmt.Errorf("failed to rename state file: %w", err)
 	}
 
