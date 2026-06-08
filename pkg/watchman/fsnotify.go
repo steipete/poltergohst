@@ -16,16 +16,16 @@ import (
 
 // FSNotifyWatcher provides file watching using fsnotify
 type FSNotifyWatcher struct {
-	watcher      *fsnotify.Watcher
-	logger       logger.Logger
-	patterns     []string
-	exclusions   []string
-	callbacks    map[string]func(FileEvent)
-	settling     time.Duration
+	watcher       *fsnotify.Watcher
+	logger        logger.Logger
+	patterns      []string
+	exclusions    []string
+	callbacks     map[string]func(FileEvent)
+	settling      time.Duration
 	pendingEvents map[string]time.Time
-	mu           sync.RWMutex
-	ctx          context.Context
-	cancel       context.CancelFunc
+	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 // NewFSNotifyWatcher creates a new fsnotify-based watcher
@@ -34,9 +34,9 @@ func NewFSNotifyWatcher(log logger.Logger) (*FSNotifyWatcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fsnotify watcher: %w", err)
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &FSNotifyWatcher{
 		watcher:       watcher,
 		logger:        log,
@@ -81,15 +81,15 @@ func (f *FSNotifyWatcher) Watch(root string, callback func(FileEvent)) error {
 	f.mu.Lock()
 	f.callbacks[root] = callback
 	f.mu.Unlock()
-	
+
 	// Add root directory
 	if err := f.addDirectory(root); err != nil {
 		return fmt.Errorf("failed to watch %s: %w", root, err)
 	}
-	
+
 	// Start event processing
 	go f.processEvents()
-	
+
 	f.logger.Info(fmt.Sprintf("Started watching %s with fsnotify", root))
 	return nil
 }
@@ -101,7 +101,7 @@ func (f *FSNotifyWatcher) WatchProject(projectPath string, callback func(FileEve
 		if err != nil {
 			return err
 		}
-		
+
 		// Skip excluded paths
 		if f.isExcluded(path) {
 			if info.IsDir() {
@@ -109,7 +109,7 @@ func (f *FSNotifyWatcher) WatchProject(projectPath string, callback func(FileEve
 			}
 			return nil
 		}
-		
+
 		// Add directories to watcher
 		if info.IsDir() {
 			if err := f.watcher.Add(path); err != nil {
@@ -118,22 +118,22 @@ func (f *FSNotifyWatcher) WatchProject(projectPath string, callback func(FileEve
 				f.logger.Debug(fmt.Sprintf("Watching directory: %s", path))
 			}
 		}
-		
+
 		return nil
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to walk project directory: %w", err)
 	}
-	
+
 	// Store callback for this project
 	f.mu.Lock()
 	f.callbacks[projectPath] = callback
 	f.mu.Unlock()
-	
+
 	// Start event processing if not already started
 	go f.processEvents()
-	
+
 	return nil
 }
 
@@ -143,18 +143,18 @@ func (f *FSNotifyWatcher) addDirectory(dir string) error {
 	if f.isExcluded(dir) {
 		return nil
 	}
-	
+
 	// Add the directory
 	if err := f.watcher.Add(dir); err != nil {
 		return err
 	}
-	
+
 	// Recursively add subdirectories
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
-	
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			subdir := filepath.Join(dir, entry.Name())
@@ -165,7 +165,7 @@ func (f *FSNotifyWatcher) addDirectory(dir string) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -175,27 +175,27 @@ func (f *FSNotifyWatcher) processEvents() {
 		select {
 		case <-f.ctx.Done():
 			return
-			
+
 		case event, ok := <-f.watcher.Events:
 			if !ok {
 				return
 			}
-			
+
 			// Skip if path is excluded or doesn't match patterns
 			if f.isExcluded(event.Name) || !f.matchesPattern(event.Name) {
 				continue
 			}
-			
+
 			// Handle directory creation - add to watcher
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					f.addDirectory(event.Name)
 				}
 			}
-			
+
 			// Apply settling delay
 			f.handleEventWithSettling(event)
-			
+
 		case err, ok := <-f.watcher.Errors:
 			if !ok {
 				return
@@ -211,7 +211,7 @@ func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 	f.pendingEvents[event.Name] = time.Now()
 	settlingDelay := f.settling
 	f.mu.Unlock()
-	
+
 	// Schedule event processing after settling delay
 	time.AfterFunc(settlingDelay, func() {
 		f.mu.Lock()
@@ -223,7 +223,7 @@ func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 		}
 		delete(f.pendingEvents, event.Name)
 		f.mu.Unlock()
-		
+
 		// Convert and dispatch event
 		fileEvent := f.convertEvent(event)
 		f.dispatchEvent(fileEvent)
@@ -235,7 +235,7 @@ func (f *FSNotifyWatcher) convertEvent(event fsnotify.Event) FileEvent {
 	fileEvent := FileEvent{
 		Path: event.Name,
 	}
-	
+
 	// Determine event type
 	switch {
 	case event.Op&fsnotify.Create == fsnotify.Create:
@@ -249,7 +249,7 @@ func (f *FSNotifyWatcher) convertEvent(event fsnotify.Event) FileEvent {
 	default:
 		fileEvent.Type = FileModified
 	}
-	
+
 	// Get file info if it exists
 	if info, err := os.Stat(event.Name); err == nil {
 		fileEvent.IsDir = info.IsDir()
@@ -260,7 +260,7 @@ func (f *FSNotifyWatcher) convertEvent(event fsnotify.Event) FileEvent {
 		// File doesn't exist but event isn't delete - might be rename
 		fileEvent.Type = FileDeleted
 	}
-	
+
 	return fileEvent
 }
 
@@ -268,11 +268,11 @@ func (f *FSNotifyWatcher) convertEvent(event fsnotify.Event) FileEvent {
 func (f *FSNotifyWatcher) dispatchEvent(event FileEvent) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
+
 	// Find the best matching callback
 	var bestMatch string
 	var bestCallback func(FileEvent)
-	
+
 	for root, callback := range f.callbacks {
 		if strings.HasPrefix(event.Path, root) {
 			if len(root) > len(bestMatch) {
@@ -281,7 +281,7 @@ func (f *FSNotifyWatcher) dispatchEvent(event FileEvent) {
 			}
 		}
 	}
-	
+
 	if bestCallback != nil {
 		bestCallback(event)
 	}
@@ -291,7 +291,7 @@ func (f *FSNotifyWatcher) dispatchEvent(event FileEvent) {
 func (f *FSNotifyWatcher) isExcluded(path string) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
+
 	// Check against exclusion patterns
 	for _, pattern := range f.exclusions {
 		// Simple pattern matching - could be enhanced with glob support
@@ -299,7 +299,7 @@ func (f *FSNotifyWatcher) isExcluded(path string) bool {
 			return true
 		}
 	}
-	
+
 	// Check common exclusions
 	base := filepath.Base(path)
 	commonExclusions := []string{
@@ -308,13 +308,13 @@ func (f *FSNotifyWatcher) isExcluded(path string) bool {
 		".vscode", "__pycache__", ".pytest_cache",
 		"target", "build", "dist", "out",
 	}
-	
+
 	for _, exc := range commonExclusions {
 		if base == exc {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -322,19 +322,19 @@ func (f *FSNotifyWatcher) isExcluded(path string) bool {
 func (f *FSNotifyWatcher) matchesPattern(path string) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	
+
 	// If no patterns specified, match everything
 	if len(f.patterns) == 0 {
 		return true
 	}
-	
+
 	// Check against patterns
 	for _, pattern := range f.patterns {
 		// Simple pattern matching
 		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
 			return true
 		}
-		
+
 		// Check if pattern matches any part of the path
 		if strings.Contains(pattern, "**") {
 			// Handle ** glob pattern
@@ -350,7 +350,7 @@ func (f *FSNotifyWatcher) matchesPattern(path string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -359,7 +359,7 @@ func (f *FSNotifyWatcher) Remove(path string) error {
 	f.mu.Lock()
 	delete(f.callbacks, path)
 	f.mu.Unlock()
-	
+
 	return f.watcher.Remove(path)
 }
 

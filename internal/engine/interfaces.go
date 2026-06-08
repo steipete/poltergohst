@@ -1,5 +1,5 @@
 // Package engine provides core interfaces for the build orchestration system.
-// Following Go best practices: "Accept interfaces, return structs" and 
+// Following Go best practices: "Accept interfaces, return structs" and
 // "Don't design with interfaces, discover them."
 package engine
 

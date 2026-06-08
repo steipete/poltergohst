@@ -37,21 +37,21 @@ func (f *DependencyFactory) CreateDefaults() interfaces.PoltergeistDependencies 
 		WatchmanClient:        f.createWatchmanClient(),
 		WatchmanConfigManager: f.createWatchmanConfigManager(),
 	}
-	
+
 	// Create priority engine and build queue if prioritization is enabled
-	if f.config.BuildScheduling != nil && 
-	   f.config.BuildScheduling.Prioritization.Enabled {
+	if f.config.BuildScheduling != nil &&
+		f.config.BuildScheduling.Prioritization.Enabled {
 		deps.PriorityEngine = f.createPriorityEngine()
 		deps.BuildQueue = f.createBuildQueue(deps.PriorityEngine)
 	}
-	
+
 	// Create notifier if notifications are enabled
-	if f.config.Notifications != nil && 
-	   f.config.Notifications.Enabled != nil && 
-	   *f.config.Notifications.Enabled {
+	if f.config.Notifications != nil &&
+		f.config.Notifications.Enabled != nil &&
+		*f.config.Notifications.Enabled {
 		deps.Notifier = f.createNotifier()
 	}
-	
+
 	return deps
 }
 
@@ -59,7 +59,7 @@ func (f *DependencyFactory) CreateDefaults() interfaces.PoltergeistDependencies 
 // This is useful for testing or custom configurations.
 func (f *DependencyFactory) CreateWithOverrides(overrides interfaces.PoltergeistDependencies) interfaces.PoltergeistDependencies {
 	deps := f.CreateDefaults()
-	
+
 	// Apply overrides (non-nil values replace defaults)
 	if overrides.StateManager != nil {
 		deps.StateManager = overrides.StateManager
@@ -85,7 +85,7 @@ func (f *DependencyFactory) CreateWithOverrides(overrides interfaces.Poltergeist
 	if overrides.PriorityEngine != nil {
 		deps.PriorityEngine = overrides.PriorityEngine
 	}
-	
+
 	return deps
 }
 

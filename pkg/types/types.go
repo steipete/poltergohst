@@ -11,16 +11,16 @@ import (
 type TargetType string
 
 const (
-	TargetTypeExecutable     TargetType = "executable"
-	TargetTypeAppBundle      TargetType = "app-bundle"
-	TargetTypeLibrary        TargetType = "library"
-	TargetTypeFramework      TargetType = "framework"
-	TargetTypeTest           TargetType = "test"
-	TargetTypeDocker         TargetType = "docker"
-	TargetTypeCustom         TargetType = "custom"
+	TargetTypeExecutable      TargetType = "executable"
+	TargetTypeAppBundle       TargetType = "app-bundle"
+	TargetTypeLibrary         TargetType = "library"
+	TargetTypeFramework       TargetType = "framework"
+	TargetTypeTest            TargetType = "test"
+	TargetTypeDocker          TargetType = "docker"
+	TargetTypeCustom          TargetType = "custom"
 	TargetTypeCMakeExecutable TargetType = "cmake-executable"
-	TargetTypeCMakeLibrary   TargetType = "cmake-library"
-	TargetTypeCMakeCustom    TargetType = "cmake-custom"
+	TargetTypeCMakeLibrary    TargetType = "cmake-library"
+	TargetTypeCMakeCustom     TargetType = "cmake-custom"
 )
 
 // Platform represents supported Apple platforms
@@ -88,12 +88,12 @@ const (
 type BuildStatus string
 
 const (
-	BuildStatusIdle       BuildStatus = "idle"
-	BuildStatusQueued     BuildStatus = "queued"
-	BuildStatusBuilding   BuildStatus = "building"
-	BuildStatusSucceeded  BuildStatus = "succeeded"
-	BuildStatusFailed     BuildStatus = "failed"
-	BuildStatusCancelled  BuildStatus = "cancelled"
+	BuildStatusIdle      BuildStatus = "idle"
+	BuildStatusQueued    BuildStatus = "queued"
+	BuildStatusBuilding  BuildStatus = "building"
+	BuildStatusSucceeded BuildStatus = "succeeded"
+	BuildStatusFailed    BuildStatus = "failed"
+	BuildStatusCancelled BuildStatus = "cancelled"
 )
 
 // ChangeType represents the classification of file changes
@@ -174,12 +174,12 @@ type CustomTarget struct {
 // CMakeExecutableTarget represents CMake executable targets
 type CMakeExecutableTarget struct {
 	BaseTarget
-	Generator   string         `json:"generator,omitempty" yaml:"generator,omitempty"`
-	BuildType   CMakeBuildType `json:"buildType,omitempty" yaml:"buildType,omitempty"`
-	CMakeArgs   []string       `json:"cmakeArgs,omitempty" yaml:"cmakeArgs,omitempty"`
-	TargetName  string         `json:"targetName" yaml:"targetName"`
-	OutputPath  string         `json:"outputPath,omitempty" yaml:"outputPath,omitempty"`
-	Parallel    *bool          `json:"parallel,omitempty" yaml:"parallel,omitempty"`
+	Generator  string         `json:"generator,omitempty" yaml:"generator,omitempty"`
+	BuildType  CMakeBuildType `json:"buildType,omitempty" yaml:"buildType,omitempty"`
+	CMakeArgs  []string       `json:"cmakeArgs,omitempty" yaml:"cmakeArgs,omitempty"`
+	TargetName string         `json:"targetName" yaml:"targetName"`
+	OutputPath string         `json:"outputPath,omitempty" yaml:"outputPath,omitempty"`
+	Parallel   *bool          `json:"parallel,omitempty" yaml:"parallel,omitempty"`
 }
 
 // CMakeLibraryTarget represents CMake library targets
@@ -301,14 +301,14 @@ type ChangeEvent struct {
 
 // TargetPriority represents target priority scoring
 type TargetPriority struct {
-	Target               string        `json:"target"`
-	Score                float64       `json:"score"`
-	LastDirectChange     time.Time     `json:"lastDirectChange"`
+	Target                string        `json:"target"`
+	Score                 float64       `json:"score"`
+	LastDirectChange      time.Time     `json:"lastDirectChange"`
 	DirectChangeFrequency float64       `json:"directChangeFrequency"`
-	FocusMultiplier      float64       `json:"focusMultiplier"`
-	AvgBuildTime         time.Duration `json:"avgBuildTime"`
-	SuccessRate          float64       `json:"successRate"`
-	RecentChanges        []ChangeEvent `json:"recentChanges"`
+	FocusMultiplier       float64       `json:"focusMultiplier"`
+	AvgBuildTime          time.Duration `json:"avgBuildTime"`
+	SuccessRate           float64       `json:"successRate"`
+	RecentChanges         []ChangeEvent `json:"recentChanges"`
 }
 
 // BuildRequest represents a queued build request
@@ -325,7 +325,7 @@ func ParseTarget(data []byte) (Target, error) {
 	var base struct {
 		Type TargetType `json:"type"`
 	}
-	
+
 	if err := json.Unmarshal(data, &base); err != nil {
 		return nil, fmt.Errorf("failed to parse target type: %w", err)
 	}
@@ -337,70 +337,70 @@ func ParseTarget(data []byte) (Target, error) {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeAppBundle:
 		var t AppBundleTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeLibrary:
 		var t LibraryTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeFramework:
 		var t FrameworkTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeTest:
 		var t TestTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeDocker:
 		var t DockerTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeCMakeExecutable:
 		var t CMakeExecutableTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeCMakeLibrary:
 		var t CMakeLibraryTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeCMakeCustom:
 		var t CMakeCustomTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	case TargetTypeCustom:
 		var t CustomTarget
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, err
 		}
 		return &t, nil
-		
+
 	default:
 		return nil, fmt.Errorf("unknown target type: %s", base.Type)
 	}
@@ -408,12 +408,12 @@ func ParseTarget(data []byte) (Target, error) {
 
 // Target interface implementations for each type
 
-func (t *BaseTarget) GetName() string                 { return t.Name }
-func (t *BaseTarget) GetType() TargetType             { return t.Type }
-func (t *BaseTarget) IsEnabled() bool                 { return t.Enabled == nil || *t.Enabled }
-func (t *BaseTarget) GetBuildCommand() string         { return t.BuildCommand }
-func (t *BaseTarget) GetWatchPaths() []string         { return t.WatchPaths }
-func (t *BaseTarget) GetSettlingDelay() int           { 
+func (t *BaseTarget) GetName() string         { return t.Name }
+func (t *BaseTarget) GetType() TargetType     { return t.Type }
+func (t *BaseTarget) IsEnabled() bool         { return t.Enabled == nil || *t.Enabled }
+func (t *BaseTarget) GetBuildCommand() string { return t.BuildCommand }
+func (t *BaseTarget) GetWatchPaths() []string { return t.WatchPaths }
+func (t *BaseTarget) GetSettlingDelay() int {
 	if t.SettlingDelay != nil {
 		return *t.SettlingDelay
 	}
@@ -441,17 +441,17 @@ func (t *BaseTarget) GetDebounceInterval() int {
 func (t *BaseTarget) GetIcon() string { return t.Icon }
 
 // Embed BaseTarget methods in specific target types
-func (t *ExecutableTarget) GetName() string { return t.BaseTarget.GetName() }
-func (t *ExecutableTarget) GetType() TargetType { return t.BaseTarget.GetType() }
-func (t *ExecutableTarget) IsEnabled() bool { return t.BaseTarget.IsEnabled() }
-func (t *ExecutableTarget) GetBuildCommand() string { return t.BaseTarget.GetBuildCommand() }
-func (t *ExecutableTarget) GetWatchPaths() []string { return t.BaseTarget.GetWatchPaths() }
-func (t *ExecutableTarget) GetSettlingDelay() int { return t.BaseTarget.GetSettlingDelay() }
+func (t *ExecutableTarget) GetName() string                   { return t.BaseTarget.GetName() }
+func (t *ExecutableTarget) GetType() TargetType               { return t.BaseTarget.GetType() }
+func (t *ExecutableTarget) IsEnabled() bool                   { return t.BaseTarget.IsEnabled() }
+func (t *ExecutableTarget) GetBuildCommand() string           { return t.BaseTarget.GetBuildCommand() }
+func (t *ExecutableTarget) GetWatchPaths() []string           { return t.BaseTarget.GetWatchPaths() }
+func (t *ExecutableTarget) GetSettlingDelay() int             { return t.BaseTarget.GetSettlingDelay() }
 func (t *ExecutableTarget) GetEnvironment() map[string]string { return t.BaseTarget.GetEnvironment() }
-func (t *ExecutableTarget) GetMaxRetries() int { return t.BaseTarget.GetMaxRetries() }
-func (t *ExecutableTarget) GetBackoffMultiplier() float64 { return t.BaseTarget.GetBackoffMultiplier() }
-func (t *ExecutableTarget) GetDebounceInterval() int { return t.BaseTarget.GetDebounceInterval() }
-func (t *ExecutableTarget) GetIcon() string { return t.BaseTarget.GetIcon() }
+func (t *ExecutableTarget) GetMaxRetries() int                { return t.BaseTarget.GetMaxRetries() }
+func (t *ExecutableTarget) GetBackoffMultiplier() float64     { return t.BaseTarget.GetBackoffMultiplier() }
+func (t *ExecutableTarget) GetDebounceInterval() int          { return t.BaseTarget.GetDebounceInterval() }
+func (t *ExecutableTarget) GetIcon() string                   { return t.BaseTarget.GetIcon() }
 
 // Repeat for other target types...
 // (Implementation is identical, just delegating to BaseTarget)

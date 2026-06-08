@@ -53,17 +53,17 @@ func TestInitCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			
+
 			// Create project files
 			for _, file := range tt.projectFiles {
 				path := filepath.Join(tmpDir, file)
 				os.WriteFile(path, []byte("test"), 0644)
 			}
-			
+
 			// Run init command
 			// Note: In a real test, we would execute the init command
 			// and verify the generated config file
-			
+
 			// For now, verify we can detect project type
 			projectType := detectProjectType(tmpDir)
 			if projectType != tt.expectedType {
@@ -129,16 +129,16 @@ func TestValidateCommand(t *testing.T) {
 			shouldError: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-			
+
 			// Write config
 			data, _ := json.Marshal(tt.config)
 			os.WriteFile(configPath, data, 0644)
-			
+
 			// Validate config
 			err := validateConfig(configPath)
 			if tt.shouldError && err == nil {
@@ -157,16 +157,16 @@ func validateConfig(path string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	var config types.PoltergeistConfig
 	if err := json.Unmarshal(data, &config); err != nil {
 		return err
 	}
-	
+
 	if config.Version == "" {
 		return fmt.Errorf("missing version")
 	}
-	
+
 	// Validate project type
 	validTypes := []types.ProjectType{
 		types.ProjectTypeNode,
@@ -176,7 +176,7 @@ func validateConfig(path string) error {
 		types.ProjectTypeCMake,
 		types.ProjectTypeMixed,
 	}
-	
+
 	valid := false
 	for _, vt := range validTypes {
 		if config.ProjectType == vt {
@@ -184,11 +184,11 @@ func validateConfig(path string) error {
 			break
 		}
 	}
-	
+
 	if !valid {
 		return fmt.Errorf("invalid project type: %s", config.ProjectType)
 	}
-	
+
 	return nil
 }
 
@@ -196,17 +196,17 @@ func TestListCommand(t *testing.T) {
 	// Test listing targets
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	// Create config with targets
 	config := types.PoltergeistConfig{
 		Version:     "1.0.0",
 		ProjectType: types.ProjectTypeNode,
 		Targets:     []json.RawMessage{},
 	}
-	
+
 	data, _ := json.Marshal(config)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	// In a real test, we would execute the list command
 	// and verify the output
 	t.Skip("Command execution not implemented")
@@ -217,7 +217,7 @@ func TestStatusCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateDir := filepath.Join(tmpDir, ".poltergeist", "state")
 	os.MkdirAll(stateDir, 0755)
-	
+
 	// Create mock state file
 	stateFile := filepath.Join(stateDir, "test-target.json")
 	state := map[string]interface{}{
@@ -225,10 +225,10 @@ func TestStatusCommand(t *testing.T) {
 		"buildStatus": "idle",
 		"processID":   os.Getpid(),
 	}
-	
+
 	data, _ := json.Marshal(state)
 	os.WriteFile(stateFile, data, 0644)
-	
+
 	// In a real test, we would execute the status command
 	// and verify it displays the state correctly
 	t.Skip("Command execution not implemented")
@@ -239,11 +239,11 @@ func TestCleanCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateDir := filepath.Join(tmpDir, ".poltergeist")
 	os.MkdirAll(stateDir, 0755)
-	
+
 	// Create some files to clean
 	os.WriteFile(filepath.Join(stateDir, "test.log"), []byte("log"), 0644)
 	os.WriteFile(filepath.Join(stateDir, "daemon.pid"), []byte("1234"), 0644)
-	
+
 	// In a real test, we would execute the clean command
 	// and verify files are removed
 	t.Skip("Command execution not implemented")
@@ -253,16 +253,16 @@ func TestBuildCommand(t *testing.T) {
 	// Test build command
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	config := types.PoltergeistConfig{
 		Version:     "1.0.0",
 		ProjectType: types.ProjectTypeNode,
 		Targets:     []json.RawMessage{},
 	}
-	
+
 	data, _ := json.Marshal(config)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	// In a real test, we would execute the build command
 	t.Skip("Command execution not implemented")
 }
@@ -271,16 +271,16 @@ func TestWatchCommand(t *testing.T) {
 	// Test watch command
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
-	
+
 	config := types.PoltergeistConfig{
 		Version:     "1.0.0",
 		ProjectType: types.ProjectTypeNode,
 		Targets:     []json.RawMessage{},
 	}
-	
+
 	data, _ := json.Marshal(config)
 	os.WriteFile(configPath, data, 0644)
-	
+
 	// In a real test, we would execute the watch command
 	// and verify it starts watching
 	t.Skip("Command execution not implemented")
@@ -289,7 +289,7 @@ func TestWatchCommand(t *testing.T) {
 func TestDaemonCommands(t *testing.T) {
 	// Test daemon start/stop/status
 	_ = t.TempDir() // Would be used for daemon tests
-	
+
 	// In a real test, we would execute daemon commands
 	t.Skip("Command execution not implemented")
 }
@@ -298,14 +298,14 @@ func TestLogsCommand(t *testing.T) {
 	// Test log viewing
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "poltergeist.log")
-	
+
 	// Create mock log file
 	logs := `[2023-01-01 10:00:00] Starting Poltergeist
 [2023-01-01 10:00:01] Watching target: backend
 [2023-01-01 10:00:02] Build completed`
-	
+
 	os.WriteFile(logFile, []byte(logs), 0644)
-	
+
 	// In a real test, we would execute the logs command
 	t.Skip("Command execution not implemented")
 }
@@ -313,7 +313,7 @@ func TestLogsCommand(t *testing.T) {
 func TestCommandHelp(t *testing.T) {
 	// Test help output for commands
 	commands := []string{"init", "watch", "build", "status", "clean"}
-	
+
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
 			// In a real test, we would verify help output
@@ -333,7 +333,7 @@ func TestGlobalFlags(t *testing.T) {
 		{"--verbose", "", "debug"},
 		{"--project-root", "/tmp/project", "/tmp/project"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.flag, func(t *testing.T) {
 			// In a real test, we would verify flag parsing
@@ -349,13 +349,13 @@ func TestConfigFileDetection(t *testing.T) {
 		"poltergeist.config.yaml",
 		".poltergeist.json",
 	}
-	
+
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			configPath := filepath.Join(tmpDir, file)
 			os.WriteFile(configPath, []byte("{}"), 0644)
-			
+
 			// Verify detection
 			found := findConfigFile(tmpDir)
 			if found != configPath {
@@ -372,14 +372,14 @@ func findConfigFile(dir string) string {
 		"poltergeist.config.yaml",
 		".poltergeist.json",
 	}
-	
+
 	for _, name := range configNames {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
-	
+
 	return ""
 }
 
@@ -424,7 +424,7 @@ func TestCommandAliases(t *testing.T) {
 		"b": "build",
 		"s": "status",
 	}
-	
+
 	for alias, cmd := range aliases {
 		t.Run(alias, func(t *testing.T) {
 			// Would verify alias maps to correct command
@@ -449,11 +449,11 @@ func TestConfigMigration(t *testing.T) {
 			}
 		]
 	}`
-	
+
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "poltergeist.config.json")
 	os.WriteFile(configPath, []byte(oldConfig), 0644)
-	
+
 	// Would test migration to new format
 	t.Skip("Config migration not implemented")
 }
@@ -477,7 +477,7 @@ func TestErrorMessages(t *testing.T) {
 			expected: "No targets defined",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.scenario, func(t *testing.T) {
 			// Would verify error messages
@@ -504,12 +504,12 @@ func TestEnvironmentVariables(t *testing.T) {
 		"POLTERGEIST_VERBOSE": "true",
 		"POLTERGEIST_ROOT":    "/project/root",
 	}
-	
+
 	for env, value := range envVars {
 		t.Run(env, func(t *testing.T) {
 			os.Setenv(env, value)
 			defer os.Unsetenv(env)
-			
+
 			// Would verify environment variable is used
 			t.Skip("Environment variable testing not implemented")
 		})
@@ -519,7 +519,7 @@ func TestEnvironmentVariables(t *testing.T) {
 func TestCommandCompletion(t *testing.T) {
 	// Test shell completion generation
 	shells := []string{"bash", "zsh", "fish", "powershell"}
-	
+
 	for _, shell := range shells {
 		t.Run(shell, func(t *testing.T) {
 			// Would verify completion script generation

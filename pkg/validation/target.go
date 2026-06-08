@@ -68,13 +68,13 @@ func (v *TargetValidator) Validate(target types.Target) *ValidationResult {
 
 	// Basic validation
 	v.validateBasicFields(target, result)
-	
+
 	// Type-specific validation
 	v.validateTypeSpecific(target, result)
-	
+
 	// Path validation
 	v.validatePaths(target, result)
-	
+
 	// Watch paths validation
 	v.validateWatchPaths(target, result)
 
@@ -84,16 +84,16 @@ func (v *TargetValidator) Validate(target types.Target) *ValidationResult {
 // ValidateMultiple validates multiple targets
 func (v *TargetValidator) ValidateMultiple(targets []types.Target) *ValidationResult {
 	result := &ValidationResult{Valid: true}
-	
+
 	names := make(map[string]bool)
-	
+
 	for _, target := range targets {
 		// Check for duplicate names
 		if names[target.GetName()] {
 			result.AddError(target.GetName(), "name", "duplicate target name", ValidationLevelError)
 		}
 		names[target.GetName()] = true
-		
+
 		// Validate individual target
 		targetResult := v.Validate(target)
 		result.Errors = append(result.Errors, targetResult.Errors...)
@@ -101,26 +101,26 @@ func (v *TargetValidator) ValidateMultiple(targets []types.Target) *ValidationRe
 			result.Valid = false
 		}
 	}
-	
+
 	return result
 }
 
 func (v *TargetValidator) validateBasicFields(target types.Target, result *ValidationResult) {
 	name := target.GetName()
-	
+
 	if name == "" {
 		result.AddError("", "name", "target name is required", ValidationLevelError)
 		return
 	}
-	
+
 	if strings.Contains(name, " ") {
 		result.AddError(name, "name", "target name cannot contain spaces", ValidationLevelError)
 	}
-	
+
 	if target.GetBuildCommand() == "" {
 		result.AddError(name, "buildCommand", "build command is required", ValidationLevelError)
 	}
-	
+
 	if len(target.GetWatchPaths()) == 0 {
 		result.AddError(name, "watchPaths", "at least one watch path is required", ValidationLevelWarning)
 	}
@@ -128,7 +128,7 @@ func (v *TargetValidator) validateBasicFields(target types.Target, result *Valid
 
 func (v *TargetValidator) validateTypeSpecific(target types.Target, result *ValidationResult) {
 	name := target.GetName()
-	
+
 	switch target.GetType() {
 	case types.TargetTypeExecutable:
 		// Executable-specific validation
@@ -137,7 +137,7 @@ func (v *TargetValidator) validateTypeSpecific(target types.Target, result *Vali
 				result.AddError(name, "outputPath", "output path is required for executable targets", ValidationLevelWarning)
 			}
 		}
-		
+
 	case types.TargetTypeAppBundle:
 		// App bundle-specific validation
 		if appBundle, ok := target.(*types.AppBundleTarget); ok {
@@ -145,7 +145,7 @@ func (v *TargetValidator) validateTypeSpecific(target types.Target, result *Vali
 				result.AddError(name, "bundleId", "bundle ID is required for app bundle targets", ValidationLevelError)
 			}
 		}
-		
+
 	case types.TargetTypeTest:
 		// Test-specific validation
 		if test, ok := target.(*types.TestTarget); ok {
@@ -153,7 +153,7 @@ func (v *TargetValidator) validateTypeSpecific(target types.Target, result *Vali
 				result.AddError(name, "testCommand", "test command is required for test targets", ValidationLevelError)
 			}
 		}
-		
+
 	case types.TargetTypeDocker:
 		// Docker-specific validation
 		if docker, ok := target.(*types.DockerTarget); ok {
@@ -166,7 +166,7 @@ func (v *TargetValidator) validateTypeSpecific(target types.Target, result *Vali
 
 func (v *TargetValidator) validatePaths(target types.Target, result *ValidationResult) {
 	name := target.GetName()
-	
+
 	// Validate output paths based on target type
 	switch t := target.(type) {
 	case *types.ExecutableTarget:
@@ -189,10 +189,10 @@ func (v *TargetValidator) validateOutputPath(targetName, outputPath string, resu
 		result.AddError(targetName, "outputPath", "output path should be relative to project root", ValidationLevelWarning)
 		return
 	}
-	
+
 	fullPath := filepath.Join(v.projectRoot, outputPath)
 	dir := filepath.Dir(fullPath)
-	
+
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		result.AddError(targetName, "outputPath", fmt.Sprintf("output directory does not exist: %s", dir), ValidationLevelWarning)
 	}
@@ -201,25 +201,25 @@ func (v *TargetValidator) validateOutputPath(targetName, outputPath string, resu
 func (v *TargetValidator) validateWatchPaths(target types.Target, result *ValidationResult) {
 	name := target.GetName()
 	watchPaths := target.GetWatchPaths()
-	
+
 	// Check if watch paths are empty
 	if len(watchPaths) == 0 {
 		result.AddError(name, "watchPaths", "no watch paths specified", ValidationLevelWarning)
 		return
 	}
-	
+
 	for _, path := range watchPaths {
 		if path == "" {
 			result.AddError(name, "watchPaths", "empty watch path", ValidationLevelError)
 			continue
 		}
-		
+
 		// Check for absolute paths
 		if filepath.IsAbs(path) {
 			result.AddError(name, "watchPaths", fmt.Sprintf("watch path should be relative: %s", path), ValidationLevelWarning)
 			continue
 		}
-		
+
 		// Check if path exists (for non-pattern paths)
 		if !strings.Contains(path, "*") && !strings.Contains(path, "?") {
 			fullPath := filepath.Join(v.projectRoot, path)
@@ -233,12 +233,12 @@ func (v *TargetValidator) validateWatchPaths(target types.Target, result *Valida
 // ValidateConfiguration validates an entire configuration
 func (v *TargetValidator) ValidateConfiguration(config *types.PoltergeistConfig) *ValidationResult {
 	result := &ValidationResult{Valid: true}
-	
+
 	if len(config.Targets) == 0 {
 		result.AddError("config", "targets", "no targets defined", ValidationLevelError)
 		return result
 	}
-	
+
 	targets := make([]types.Target, 0, len(config.Targets))
 	for _, rawTarget := range config.Targets {
 		target, err := types.ParseTarget(rawTarget)
@@ -248,13 +248,13 @@ func (v *TargetValidator) ValidateConfiguration(config *types.PoltergeistConfig)
 		}
 		targets = append(targets, target)
 	}
-	
+
 	// Validate all targets
 	targetsResult := v.ValidateMultiple(targets)
 	result.Errors = append(result.Errors, targetsResult.Errors...)
 	if !targetsResult.Valid {
 		result.Valid = false
 	}
-	
+
 	return result
 }

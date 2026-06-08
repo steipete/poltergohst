@@ -40,10 +40,10 @@ func (n *BuildNotifier) NotifyBuildStart(target string) {
 	if !n.enabled {
 		return
 	}
-	
+
 	title := "👻 Poltergeist"
 	message := fmt.Sprintf("Building %s...", target)
-	
+
 	n.sendNotification(title, message, "")
 }
 
@@ -52,10 +52,10 @@ func (n *BuildNotifier) NotifyBuildSuccess(target string, duration time.Duration
 	if !n.enabled {
 		return
 	}
-	
+
 	title := "✅ Build Succeeded"
 	message := fmt.Sprintf("%s built in %s", target, formatDuration(duration))
-	
+
 	n.sendNotification(title, message, n.successSound)
 }
 
@@ -64,10 +64,10 @@ func (n *BuildNotifier) NotifyBuildFailure(target string, err error) {
 	if !n.enabled {
 		return
 	}
-	
+
 	title := "❌ Build Failed"
 	message := fmt.Sprintf("%s: %v", target, err)
-	
+
 	n.sendNotification(title, message, n.failureSound)
 }
 
@@ -103,7 +103,7 @@ func (n *BuildNotifier) sendMacNotification(title, message, soundName string) {
 	if err := beeep.Notify(title, message, ""); err != nil {
 		n.logger.Debug("Failed to send notification", logger.WithField("error", err))
 	}
-	
+
 	// Play sound if specified
 	if soundName != "" {
 		if err := beeep.Beep(beeep.DefaultFreq, beeep.DefaultDuration); err != nil {

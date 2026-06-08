@@ -15,11 +15,11 @@ import (
 // CLI encapsulates the command-line interface and makes it testable
 // by eliminating global state. This follows Go best practices.
 type CLI struct {
-	config     *Config
-	rootCmd    *cobra.Command
-	logger     logger.Logger
-	output     io.Writer
-	errorOut   io.Writer
+	config   *Config
+	rootCmd  *cobra.Command
+	logger   logger.Logger
+	output   io.Writer
+	errorOut io.Writer
 }
 
 // NewCLI creates a new CLI instance with the given configuration
@@ -27,13 +27,13 @@ func NewCLI(config *Config) *CLI {
 	if config == nil {
 		config = NewConfig()
 	}
-	
+
 	cli := &CLI{
 		config:   config,
 		output:   os.Stdout,
 		errorOut: os.Stderr,
 	}
-	
+
 	cli.setupCommands()
 	return cli
 }
@@ -67,21 +67,21 @@ func (c *CLI) setupCommands() {
 Poltergeist watches your project files and automatically rebuilds targets when
 changes are detected. It's like having a helpful ghost that builds your code
 before you even ask!`,
-		
+
 		PersistentPreRunE: c.initializeConfig,
 		Run: func(cmd *cobra.Command, args []string) {
 			// If no subcommand, show help
 			cmd.Help()
 		},
 	}
-	
+
 	// Setup flags
 	c.setupFlags()
-	
+
 	// Setup version
 	c.rootCmd.Version = c.config.Version
 	c.rootCmd.SetVersionTemplate("👻 Poltergeist v{{.Version}}\n")
-	
+
 	// Add subcommands
 	c.rootCmd.AddCommand(c.newWatchCmd())
 	c.rootCmd.AddCommand(c.newInitCmd())
@@ -96,7 +96,7 @@ before you even ask!`,
 
 func (c *CLI) setupFlags() {
 	flags := c.rootCmd.PersistentFlags()
-	
+
 	// Global flags - bind to config struct
 	flags.StringVar(&c.config.ConfigFile, "config", "", "config file (default: poltergeist.config.json)")
 	flags.StringVar(&c.config.ProjectRoot, "root", ".", "project root directory")
@@ -106,7 +106,7 @@ func (c *CLI) setupFlags() {
 func (c *CLI) initializeConfig(cmd *cobra.Command, args []string) error {
 	// Create logger with configured verbosity
 	c.logger = logger.CreateLogger("", c.config.Verbosity)
-	
+
 	if c.config.ConfigFile != "" {
 		// Use config file from flag
 		viper.SetConfigFile(c.config.ConfigFile)
@@ -115,25 +115,25 @@ func (c *CLI) initializeConfig(cmd *cobra.Command, args []string) error {
 		viper.AddConfigPath(c.config.ProjectRoot)
 		viper.SetConfigName("poltergeist.config")
 		viper.SetConfigType("json")
-		
+
 		// Also try YAML
 		viper.SetConfigName("poltergeist.config")
 		viper.SetConfigType("yaml")
 	}
-	
+
 	// Read in environment variables
 	viper.SetEnvPrefix("POLTERGEIST")
 	viper.AutomaticEnv()
-	
+
 	// Read config file
 	if err := viper.ReadInConfig(); err == nil {
 		// Use structured logging instead of fmt.Println
 		if c.config.Verbosity == "debug" {
-			c.logger.Debug("Using config file", 
+			c.logger.Debug("Using config file",
 				logger.WithField("file", viper.ConfigFileUsed()))
 		}
 	}
-	
+
 	return nil
 }
 

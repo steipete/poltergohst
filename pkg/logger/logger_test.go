@@ -76,7 +76,7 @@ func TestLogger_WithFields(t *testing.T) {
 	var buf bytes.Buffer
 	log := logger.CreateLoggerWithOutput("", "info", &buf)
 
-	log.Info("test message", 
+	log.Info("test message",
 		logger.WithField("key1", "value1"),
 		logger.WithField("key2", 42),
 	)

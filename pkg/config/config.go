@@ -26,14 +26,14 @@ func (m *Manager) LoadConfig(path string) (*types.PoltergeistConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
-	
+
 	var cfg types.PoltergeistConfig
-	
+
 	// Try JSON first
 	if err := json.Unmarshal(data, &cfg); err == nil {
 		return m.validateConfig(&cfg)
 	}
-	
+
 	// Try YAML - need special handling for json.RawMessage fields
 	var yamlData map[string]interface{}
 	if err := yaml.Unmarshal(data, &yamlData); err == nil {
@@ -45,7 +45,7 @@ func (m *Manager) LoadConfig(path string) (*types.PoltergeistConfig, error) {
 			}
 		}
 	}
-	
+
 	return nil, fmt.Errorf("failed to parse config as JSON or YAML")
 }
 
@@ -55,7 +55,7 @@ func (m *Manager) ValidateConfig(config *types.PoltergeistConfig) error {
 	if config.Version != "1.0" {
 		return fmt.Errorf("unsupported config version: %s", config.Version)
 	}
-	
+
 	// Check project type
 	validProjectTypes := map[types.ProjectType]bool{
 		types.ProjectTypeSwift:  true,
@@ -65,35 +65,35 @@ func (m *Manager) ValidateConfig(config *types.PoltergeistConfig) error {
 		types.ProjectTypeCMake:  true,
 		types.ProjectTypeMixed:  true,
 	}
-	
+
 	if !validProjectTypes[config.ProjectType] {
 		return fmt.Errorf("invalid project type: %s", config.ProjectType)
 	}
-	
+
 	// Validate targets
 	if len(config.Targets) == 0 {
 		return fmt.Errorf("no targets defined")
 	}
-	
+
 	targetNames := make(map[string]bool)
 	for i, rawTarget := range config.Targets {
 		target, err := types.ParseTarget(rawTarget)
 		if err != nil {
 			return fmt.Errorf("target %d: %w", i, err)
 		}
-		
+
 		// Check for duplicate names
 		if targetNames[target.GetName()] {
 			return fmt.Errorf("duplicate target name: %s", target.GetName())
 		}
 		targetNames[target.GetName()] = true
-		
+
 		// Validate target
 		if err := m.validateTarget(target); err != nil {
 			return fmt.Errorf("target '%s': %w", target.GetName(), err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -106,7 +106,7 @@ func (m *Manager) WatchConfig(path string, callback func(*types.PoltergeistConfi
 // GetDefaultConfig returns a default configuration for a project type
 func (m *Manager) GetDefaultConfig(projectType types.ProjectType) *types.PoltergeistConfig {
 	enabled := true
-	
+
 	return &types.PoltergeistConfig{
 		Version:     "1.0",
 		ProjectType: projectType,
@@ -155,7 +155,7 @@ func (m *Manager) validateTarget(target types.Target) error {
 	if target.GetName() == "" {
 		return fmt.Errorf("missing name")
 	}
-	
+
 	// Check build command
 	if target.GetBuildCommand() == "" {
 		// Some target types have alternative commands
@@ -166,12 +166,12 @@ func (m *Manager) validateTarget(target types.Target) error {
 			return fmt.Errorf("missing build command")
 		}
 	}
-	
+
 	// Check watch paths
 	if len(target.GetWatchPaths()) == 0 {
 		return fmt.Errorf("no watch paths defined")
 	}
-	
+
 	return nil
 }
 

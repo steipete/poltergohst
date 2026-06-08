@@ -33,16 +33,16 @@ func (m *ConfigManager) EnsureConfigUpToDate(config *types.PoltergeistConfig) er
 // SuggestOptimizations suggests performance optimizations
 func (m *ConfigManager) SuggestOptimizations() ([]string, error) {
 	suggestions := []string{}
-	
+
 	// TODO: Analyze project and suggest optimizations
-	
+
 	return suggestions, nil
 }
 
 // CreateExclusionExpressions creates watchman exclusion expressions
 func (m *ConfigManager) CreateExclusionExpressions(config *types.PoltergeistConfig) []interfaces.ExclusionExpression {
 	exclusions := []interfaces.ExclusionExpression{}
-	
+
 	// Add custom exclusions
 	if config.Watchman != nil && config.Watchman.ExcludeDirs != nil {
 		for _, dir := range config.Watchman.ExcludeDirs {
@@ -52,7 +52,7 @@ func (m *ConfigManager) CreateExclusionExpressions(config *types.PoltergeistConf
 			})
 		}
 	}
-	
+
 	// Add default exclusions if enabled
 	if config.Watchman == nil || config.Watchman.UseDefaultExclusions {
 		defaultExclusions := []string{
@@ -60,7 +60,7 @@ func (m *ConfigManager) CreateExclusionExpressions(config *types.PoltergeistConf
 			".next", ".nuxt", ".cache", "coverage", ".vscode",
 			".idea", "*.log", "tmp", "temp",
 		}
-		
+
 		for _, pattern := range defaultExclusions {
 			exclusions = append(exclusions, interfaces.ExclusionExpression{
 				Type:     "dirname",
@@ -68,7 +68,7 @@ func (m *ConfigManager) CreateExclusionExpressions(config *types.PoltergeistConf
 			})
 		}
 	}
-	
+
 	return exclusions
 }
 
@@ -76,23 +76,23 @@ func (m *ConfigManager) CreateExclusionExpressions(config *types.PoltergeistConf
 func (m *ConfigManager) NormalizeWatchPattern(pattern string) string {
 	// Clean up the pattern
 	pattern = strings.TrimSpace(pattern)
-	
+
 	// Convert to absolute path if relative
 	if !filepath.IsAbs(pattern) && !strings.Contains(pattern, "*") {
 		pattern = filepath.Join(m.projectRoot, pattern)
 	}
-	
+
 	// Normalize glob patterns
 	if strings.HasPrefix(pattern, "**") {
 		// Already a proper glob
 		return pattern
 	}
-	
+
 	// Add wildcards for directories
 	if !strings.Contains(pattern, "*") {
 		pattern = filepath.Join(pattern, "**", "*")
 	}
-	
+
 	return pattern
 }
 
@@ -102,8 +102,8 @@ func (m *ConfigManager) ValidateWatchPattern(pattern string) error {
 	if pattern == "" {
 		return fmt.Errorf("empty watch pattern")
 	}
-	
+
 	// TODO: More sophisticated pattern validation
-	
+
 	return nil
 }

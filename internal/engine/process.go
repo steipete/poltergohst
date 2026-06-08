@@ -19,9 +19,9 @@ type Manager struct {
 	heartbeatFunc    func()
 	heartbeatStop    chan struct{}
 	// Removed ctx and cancel - contexts should be passed as parameters
-	wg               sync.WaitGroup
-	mu               sync.Mutex
-	running          bool
+	wg      sync.WaitGroup
+	mu      sync.Mutex
+	running bool
 }
 
 // NewManager creates a new process manager
@@ -37,7 +37,7 @@ func NewManager(log logger.Logger) *Manager {
 func (m *Manager) RegisterShutdownHandler(handler func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.shutdownHandlers = append(m.shutdownHandlers, handler)
 }
 
@@ -51,15 +51,15 @@ func (m *Manager) Start(ctx context.Context) {
 	}
 	m.running = true
 	m.mu.Unlock()
-	
+
 	// Handle OS signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-	
+
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		
+
 		select {
 		case <-ctx.Done():
 			m.handleShutdown()
@@ -68,7 +68,7 @@ func (m *Manager) Start(ctx context.Context) {
 			m.handleShutdown()
 		}
 	}()
-	
+
 	// Start heartbeat if configured
 	if m.heartbeatFunc != nil {
 		m.startHeartbeat(ctx)
@@ -84,12 +84,12 @@ func (m *Manager) Stop() {
 	}
 	m.running = false
 	m.mu.Unlock()
-	
+
 	// Stop heartbeat
 	if m.heartbeatStop != nil {
 		close(m.heartbeatStop)
 	}
-	
+
 	// Wait for goroutines
 	m.wg.Wait()
 }
@@ -112,14 +112,14 @@ func (m *Manager) SetHeartbeat(fn func()) {
 
 func (m *Manager) handleShutdown() {
 	m.logger.Info("Initiating graceful shutdown...")
-	
+
 	// Call shutdown handlers in reverse order
 	m.mu.Lock()
 	handlers := make([]func(), len(m.shutdownHandlers))
 	copy(handlers, m.shutdownHandlers)
 	m.running = false
 	m.mu.Unlock()
-	
+
 	for i := len(handlers) - 1; i >= 0; i-- {
 		handlers[i]()
 	}
@@ -128,14 +128,14 @@ func (m *Manager) handleShutdown() {
 func (m *Manager) startHeartbeat(ctx context.Context) {
 	m.heartbeatStop = make(chan struct{})
 	interval := 10 * time.Second
-	
+
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		
+
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-m.heartbeatStop:
@@ -165,11 +165,11 @@ func GetProcessInfo(pid int) (*ProcessInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check if process is running
 	err = proc.Signal(syscall.Signal(0))
 	isRunning := err == nil
-	
+
 	return &ProcessInfo{
 		PID:       pid,
 		IsRunning: isRunning,
@@ -183,21 +183,21 @@ func KillProcess(pid int) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Try graceful shutdown first
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		// Force kill if graceful fails
 		return proc.Kill()
 	}
-	
+
 	// Wait a bit for graceful shutdown
 	time.Sleep(2 * time.Second)
-	
+
 	// Check if still running
 	if err := proc.Signal(syscall.Signal(0)); err == nil {
 		// Still running, force kill
 		return proc.Kill()
 	}
-	
+
 	return nil
 }

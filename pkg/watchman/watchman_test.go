@@ -18,7 +18,7 @@ import (
 func TestWatchmanClient_Watch(t *testing.T) {
 	tmpDir := t.TempDir()
 	log := logger.CreateLogger("", "info")
-	
+
 	// Create test files
 	testFiles := []string{"main.go", "test.go", "doc.md"}
 	for _, file := range testFiles {
@@ -58,7 +58,7 @@ func TestWatchmanClient_Watch(t *testing.T) {
 func TestWatchmanClient_Subscribe(t *testing.T) {
 	tmpDir := t.TempDir()
 	log := logger.CreateLogger("", "info")
-	
+
 	client := watchman.NewClient(log)
 	// ctx is unused in this test since Subscribe doesn't use it
 	// _ = ctx
@@ -70,12 +70,12 @@ func TestWatchmanClient_Subscribe(t *testing.T) {
 			[]interface{}{"match", "*.go"},
 		},
 	}
-	
+
 	// Create callback
 	callback := func(changes []interfaces.FileChange) {
 		// Handle file changes
 	}
-	
+
 	// Create exclusions
 	exclusions := []interfaces.ExclusionExpression{}
 
@@ -110,7 +110,7 @@ func TestWatchmanClient_GetVersion(t *testing.T) {
 func TestWatchmanConfig_GenerateQuery(t *testing.T) {
 	config := &types.WatchmanConfig{
 		UseDefaultExclusions: true,
-		ExcludeDirs: []string{"node_modules", ".git"},
+		ExcludeDirs:          []string{"node_modules", ".git"},
 		Rules: []types.ExclusionRule{
 			{Pattern: "*.log", Action: "exclude"},
 			{Pattern: "*.tmp", Action: "exclude"},
@@ -119,15 +119,15 @@ func TestWatchmanConfig_GenerateQuery(t *testing.T) {
 	}
 
 	cm := watchman.NewConfigManager(".", nil)
-	
+
 	// Create poltergeist config with watchman config
 	poltergeistConfig := &types.PoltergeistConfig{
-		Targets: []json.RawMessage{},
+		Targets:  []json.RawMessage{},
 		Watchman: config,
 	}
-	
+
 	exclusions := cm.CreateExclusionExpressions(poltergeistConfig)
-	
+
 	// Build query with patterns and exclusions
 	query := make(map[string]interface{})
 	query["expression"] = []interface{}{
@@ -137,7 +137,7 @@ func TestWatchmanConfig_GenerateQuery(t *testing.T) {
 			[]interface{}{"match", "*.js"},
 		},
 	}
-	
+
 	// Apply exclusions to query
 	if len(exclusions) > 0 {
 		var excludeExpr []interface{}
@@ -156,16 +156,16 @@ func TestWatchmanConfig_GenerateQuery(t *testing.T) {
 			}
 		}
 	}
-	
+
 	// Verify query structure
 	data, _ := json.Marshal(query)
 	queryStr := string(data)
-	
+
 	// Should include patterns
 	if !contains(queryStr, "*.go") {
 		t.Error("expected query to include *.go pattern")
 	}
-	
+
 	// Should exclude directories
 	// Note: exclusions may be structured differently, so we check the exclusions array
 	hasNodeModulesExclusion := false
@@ -185,7 +185,7 @@ func TestWatchmanConfig_GenerateQuery(t *testing.T) {
 func TestWatchmanConfig_Exclusions(t *testing.T) {
 	config := &types.WatchmanConfig{
 		UseDefaultExclusions: true,
-		ExcludeDirs: []string{"custom_dir"},
+		ExcludeDirs:          []string{"custom_dir"},
 		Rules: []types.ExclusionRule{
 			{Pattern: "*.custom", Action: "exclude"},
 		},
@@ -193,7 +193,7 @@ func TestWatchmanConfig_Exclusions(t *testing.T) {
 
 	cm := watchman.NewConfigManager(".", nil)
 	poltergeistConfig := &types.PoltergeistConfig{
-		Targets: []json.RawMessage{},
+		Targets:  []json.RawMessage{},
 		Watchman: config,
 	}
 	exclusions := cm.CreateExclusionExpressions(poltergeistConfig)
@@ -239,10 +239,10 @@ func TestWatchmanConfig_Exclusions(t *testing.T) {
 func TestFallbackWatcher_Watch(t *testing.T) {
 	tmpDir := t.TempDir()
 	log := logger.CreateLogger("", "info")
-	
+
 	// Create test files
 	os.WriteFile(filepath.Join(tmpDir, "test.go"), []byte("test"), 0644)
-	
+
 	watcher, err := watchman.NewFallbackWatcher(log)
 	if err != nil {
 		t.Fatalf("failed to create fallback watcher: %v", err)
@@ -274,7 +274,7 @@ func TestFallbackWatcher_Watch(t *testing.T) {
 func TestFallbackWatcher_CreateFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	log := logger.CreateLogger("", "info")
-	
+
 	watcher, err := watchman.NewFallbackWatcher(log)
 	if err != nil {
 		t.Fatalf("failed to create fallback watcher: %v", err)
@@ -309,11 +309,11 @@ func TestFallbackWatcher_CreateFile(t *testing.T) {
 func TestFallbackWatcher_DeleteFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	log := logger.CreateLogger("", "info")
-	
+
 	// Create file first
 	testFile := filepath.Join(tmpDir, "delete.go")
 	os.WriteFile(testFile, []byte("delete me"), 0644)
-	
+
 	watcher, err := watchman.NewFallbackWatcher(log)
 	if err != nil {
 		t.Fatalf("failed to create fallback watcher: %v", err)
@@ -345,7 +345,7 @@ func TestFallbackWatcher_DeleteFile(t *testing.T) {
 func TestFallbackWatcher_PatternMatching(t *testing.T) {
 	tmpDir := t.TempDir()
 	log := logger.CreateLogger("", "info")
-	
+
 	watcher, err := watchman.NewFallbackWatcher(log)
 	if err != nil {
 		t.Fatalf("failed to create fallback watcher: %v", err)
@@ -354,7 +354,7 @@ func TestFallbackWatcher_PatternMatching(t *testing.T) {
 	defer cancel()
 
 	events := make(chan watchman.FileEvent, 10)
-	
+
 	// Watch only .go files
 	err = watcher.Watch(ctx, tmpDir, []string{"*.go"}, events)
 	if err != nil {
@@ -371,7 +371,7 @@ func TestFallbackWatcher_PatternMatching(t *testing.T) {
 	// Should only get event for .go file
 	eventCount := 0
 	timeout := time.After(1 * time.Second)
-	
+
 	for {
 		select {
 		case event := <-events:
@@ -391,16 +391,16 @@ func TestFallbackWatcher_PatternMatching(t *testing.T) {
 func TestWatchmanClient_Reconnect(t *testing.T) {
 	log := logger.CreateLogger("", "info")
 	client := watchman.NewClient(log)
-	
+
 	// Simulate connection failure and reconnect
 	client.Disconnect()
-	
+
 	// Should reconnect automatically on next operation
 	version, err := client.GetVersion()
 	if err != nil {
 		t.Skip("Watchman not available")
 	}
-	
+
 	if version == "" {
 		t.Error("expected to reconnect and get version")
 	}
@@ -409,39 +409,39 @@ func TestWatchmanClient_Reconnect(t *testing.T) {
 func TestWatchmanConfig_SettlingDelay(t *testing.T) {
 	tmpDir := t.TempDir()
 	log := logger.CreateLogger("", "info")
-	
+
 	config := &types.WatchmanConfig{
 		SettlingDelay: 500, // 500ms
 	}
-	
+
 	watcher, err := watchman.NewFallbackWatcher(log)
 	if err != nil {
 		t.Fatalf("failed to create fallback watcher: %v", err)
 	}
 	watcher.SetConfig(config)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	events := make(chan watchman.FileEvent, 10)
 	err = watcher.Watch(ctx, tmpDir, []string{"*.go"}, events)
 	if err != nil {
 		t.Fatalf("failed to start watcher: %v", err)
 	}
-	
+
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Rapid file changes
 	testFile := filepath.Join(tmpDir, "test.go")
 	for i := 0; i < 5; i++ {
 		os.WriteFile(testFile, []byte(string(rune('a'+i))), 0644)
 		time.Sleep(50 * time.Millisecond)
 	}
-	
+
 	// Should get fewer events due to settling
 	eventCount := 0
 	timeout := time.After(1 * time.Second)
-	
+
 	for {
 		select {
 		case <-events:
@@ -459,7 +459,7 @@ func TestWatchmanConfig_SettlingDelay(t *testing.T) {
 func BenchmarkWatchmanQuery(b *testing.B) {
 	config := &types.WatchmanConfig{
 		UseDefaultExclusions: true,
-		ExcludeDirs: []string{"node_modules", ".git", "vendor"},
+		ExcludeDirs:          []string{"node_modules", ".git", "vendor"},
 		Rules: []types.ExclusionRule{
 			{Pattern: "*.log", Action: "exclude"},
 			{Pattern: "*.tmp", Action: "exclude"},
@@ -467,13 +467,13 @@ func BenchmarkWatchmanQuery(b *testing.B) {
 		},
 		MaxFileEvents: 1000,
 	}
-	
+
 	cm := watchman.NewConfigManager(".", nil)
 	poltergeistConfig := &types.PoltergeistConfig{
-		Targets: []json.RawMessage{},
+		Targets:  []json.RawMessage{},
 		Watchman: config,
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		cm.CreateExclusionExpressions(poltergeistConfig)
@@ -483,29 +483,29 @@ func BenchmarkWatchmanQuery(b *testing.B) {
 func BenchmarkFallbackWatcher(b *testing.B) {
 	tmpDir := b.TempDir()
 	log := logger.CreateLogger("", "error")
-	
+
 	// Create many files
 	for i := 0; i < 100; i++ {
 		os.WriteFile(filepath.Join(tmpDir, fmt.Sprintf("file%d.go", i)), []byte("test"), 0644)
 	}
-	
+
 	watcher, err := watchman.NewFallbackWatcher(log)
 	if err != nil {
 		b.Fatalf("failed to create fallback watcher: %v", err)
 	}
 	ctx := context.Background()
 	events := make(chan watchman.FileEvent, 1000)
-	
+
 	err = watcher.Watch(ctx, tmpDir, []string{"*.go"}, events)
 	if err != nil {
 		b.Fatalf("failed to start watcher: %v", err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Modify a file
 		os.WriteFile(filepath.Join(tmpDir, "file0.go"), []byte(fmt.Sprintf("test%d", i)), 0644)
-		
+
 		// Wait for event
 		select {
 		case <-events:

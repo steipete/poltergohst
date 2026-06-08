@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	"golang.org/x/sync/errgroup"
 	"github.com/poltergeist/poltergeist/pkg/logger"
+	"golang.org/x/sync/errgroup"
 )
 
 // SafeGroup wraps errgroup.Group with panic recovery to prevent
@@ -33,18 +33,18 @@ func (sg *SafeGroup) Go(fn func() error) {
 		defer func() {
 			if r := recover(); r != nil {
 				stack := debug.Stack()
-				
+
 				// Convert panic to error
 				panicErr := fmt.Errorf("goroutine panic: %v", r)
-				
+
 				sg.logger.Error("Goroutine panic recovered",
 					logger.WithField("panic", r),
 					logger.WithField("stack_trace", string(stack)))
-				
+
 				err = panicErr
 			}
 		}()
-		
+
 		return fn()
 	})
 }
@@ -67,6 +67,6 @@ func (sg *SafeGroup) Wait() (err error) {
 			err = fmt.Errorf("wait panic: %v", r)
 		}
 	}()
-	
+
 	return sg.group.Wait()
 }

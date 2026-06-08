@@ -24,10 +24,10 @@ func NewConfig() *Config {
 
 // RuntimeConfig holds runtime configuration for commands
 type RuntimeConfig struct {
-	Config      *Config
-	Context     context.Context
-	StartTime   time.Time
-	RequestID   string
+	Config    *Config
+	Context   context.Context
+	StartTime time.Time
+	RequestID string
 }
 
 // NewRuntimeConfig creates a runtime configuration with context
@@ -35,7 +35,7 @@ func NewRuntimeConfig(cfg *Config, ctx context.Context) *RuntimeConfig {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	
+
 	return &RuntimeConfig{
 		Config:    cfg,
 		Context:   ctx,
