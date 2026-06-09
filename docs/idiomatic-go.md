@@ -3,7 +3,7 @@ https://gist.github.com/ashokallu/47a70a70c7f6857ff29e1cd3cb97bbd3
 
 > *"Go is about making software engineering more effective, not just making programmers more productive."* - The Go Team
 
-**Target Go Version**: Go 1.24+ (Latest Stable: Go 1.24.5 released July 8, 2025 - Go 1.25 expected August 2025)
+**Target Go Version**: Go 1.25+ with the Go 1.26.4 toolchain
 
 ---
 
@@ -385,9 +385,9 @@ type Order struct { UserID string }
 // go.mod
 module github.com/ashokallu/myservice
 
-go 1.23
+go 1.25.0
 
-toolchain go1.24.5 // Guarantees exact Go toolchain for reproducible builds
+toolchain go1.26.4 // Guarantees exact Go toolchain for reproducible builds
 
 require (
     golang.org/x/sync v0.7.0
@@ -400,7 +400,7 @@ require (
 
 ```go
 // go.work
-go 1.23
+go 1.25.0
 
 use (
     ./service-a
@@ -409,7 +409,7 @@ use (
 )
 ```
 
-Run `go mod tidy -go=1.23` to maintain version consistency across workspace modules.
+Run `go mod tidy -go=1.25` to maintain version consistency across workspace modules.
 
 ### Package Naming Rules
 
@@ -4960,7 +4960,7 @@ Go teaches us that great software engineering is about building reliable, mainta
 **Modern Go Features:**
 - [Go Generics Tutorial](https://go.dev/doc/tutorial/generics) - Type parameters
 - [When to Use Generics](https://go.dev/blog/when-generics) - Official guidance
-- [Go 1.24 Release Notes](https://go.dev/doc/go1.24) - Latest features
+- [Go 1.26 Release Notes](https://go.dev/doc/go1.26) - Latest features
 
 ---
 

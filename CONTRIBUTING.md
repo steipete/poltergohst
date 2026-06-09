@@ -40,7 +40,7 @@ By participating in this project, you agree to abide by our Code of Conduct:
 
 ### Prerequisites
 
-- Go 1.22 or later
+- Go 1.25 or later
 - Watchman (optional, for testing)
 - golangci-lint (for linting)
 - Make (optional)
