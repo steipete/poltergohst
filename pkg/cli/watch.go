@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	poltergeist "github.com/poltergeist/poltergeist/internal/engine"
 	"github.com/poltergeist/poltergeist/pkg/logger"
-	"github.com/poltergeist/poltergeist/pkg/poltergeist"
 	"github.com/poltergeist/poltergeist/pkg/types"
 	"github.com/spf13/cobra"
 )

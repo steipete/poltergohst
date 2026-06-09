@@ -157,6 +157,9 @@ func CreateTargetLogger(baseLogger Logger, targetName string) Logger {
 // CreateLoggerWithOutput creates a logger with custom output (for testing)
 func CreateLoggerWithOutput(logFile string, logLevel string, output io.Writer) Logger {
 	log := logrus.New()
+	if output == nil {
+		output = io.Discard
+	}
 
 	// Set log level
 	level, err := logrus.ParseLevel(logLevel)

@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	poltergeist "github.com/poltergeist/poltergeist/internal/engine"
 	"github.com/poltergeist/poltergeist/pkg/interfaces"
 	"github.com/poltergeist/poltergeist/pkg/logger"
-	"github.com/poltergeist/poltergeist/pkg/poltergeist"
 	"github.com/poltergeist/poltergeist/pkg/process"
 	"github.com/poltergeist/poltergeist/pkg/types"
 )

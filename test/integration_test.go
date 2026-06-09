@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package integration_test
@@ -13,11 +14,11 @@ import (
 	"testing"
 	"time"
 
+	poltergeist "github.com/poltergeist/poltergeist/internal/engine"
 	"github.com/poltergeist/poltergeist/pkg/builders"
 	"github.com/poltergeist/poltergeist/pkg/config"
 	"github.com/poltergeist/poltergeist/pkg/interfaces"
 	"github.com/poltergeist/poltergeist/pkg/logger"
-	"github.com/poltergeist/poltergeist/pkg/poltergeist"
 	"github.com/poltergeist/poltergeist/pkg/queue"
 	"github.com/poltergeist/poltergeist/pkg/state"
 	"github.com/poltergeist/poltergeist/pkg/types"
@@ -30,7 +31,7 @@ func TestEndToEndBuild(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	
+
 	// Create a simple Go project
 	mainFile := filepath.Join(tmpDir, "main.go")
 	err := ioutil.WriteFile(mainFile, []byte(`
@@ -66,7 +67,7 @@ func TestEndToEndBuild(t *testing.T) {
 
 	// Create and start Poltergeist
 	p := poltergeist.New(cfg, tmpDir, log, deps, "")
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -94,7 +95,7 @@ func TestEndToEndBuild(t *testing.T) {
 
 	// Stop Poltergeist
 	p.Stop()
-	
+
 	// Check if binary was created
 	outputPath := filepath.Join(tmpDir, "main")
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
@@ -164,7 +165,7 @@ func TestMultiTargetBuilds(t *testing.T) {
 	log := logger.CreateLogger("", "info")
 	priorityEngine := queue.NewPriorityEngine(cfg.BuildScheduling, log)
 	buildQueue := queue.NewIntelligentBuildQueue(cfg.BuildScheduling, log, priorityEngine, nil)
-	
+
 	deps := interfaces.PoltergeistDependencies{
 		StateManager:   state.NewStateManager(tmpDir, log),
 		BuilderFactory: builders.NewBuilderFactory(),
@@ -174,7 +175,7 @@ func TestMultiTargetBuilds(t *testing.T) {
 
 	// Create and start Poltergeist
 	p := poltergeist.New(cfg, tmpDir, log, deps, "")
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -235,7 +236,7 @@ func TestBuildFailureRecovery(t *testing.T) {
 	}
 
 	p := poltergeist.New(cfg, tmpDir, log, deps, "")
-	
+
 	// Start
 	go p.Start("")
 
@@ -269,7 +270,7 @@ func TestStatePersistence(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	
+
 	cfg := &types.PoltergeistConfig{
 		Version:     "1.0",
 		ProjectType: types.ProjectType("go"),
@@ -285,7 +286,7 @@ func TestStatePersistence(t *testing.T) {
 	}
 
 	log := logger.CreateLogger("", "info")
-	
+
 	// First instance
 	{
 		sm := state.NewStateManager(tmpDir, log)
@@ -297,17 +298,17 @@ func TestStatePersistence(t *testing.T) {
 		p := poltergeist.New(cfg, tmpDir, log, deps, "")
 		go p.Start("")
 		time.Sleep(2 * time.Second)
-		
+
 		// Update state
 		sm.UpdateBuildStatus("test", types.BuildStatusSucceeded)
-		
+
 		p.Stop()
 	}
 
 	// Second instance - should load existing state
 	{
 		sm := state.NewStateManager(tmpDir, log)
-		
+
 		// Check if state was persisted
 		s, err := sm.ReadState("test")
 		if err != nil {
@@ -358,7 +359,7 @@ func TestConcurrentFileChanges(t *testing.T) {
 
 	p := poltergeist.New(cfg, tmpDir, log, deps, "")
 	go p.Start("")
-	
+
 	time.Sleep(1 * time.Second)
 
 	// Simulate rapid concurrent file changes
@@ -390,7 +391,7 @@ func TestMemoryLeaks(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	
+
 	cfg := &types.PoltergeistConfig{
 		Version:     "1.0",
 		ProjectType: types.ProjectType("go"),
@@ -424,7 +425,7 @@ func TestMemoryLeaks(t *testing.T) {
 
 	// Memory usage should be stable
 	// In a real test, we would measure memory usage here
-	
+
 	p.Stop()
 }
 
@@ -458,7 +459,7 @@ func TestConfigReload(t *testing.T) {
 	// Start with initial config
 	manager := config.NewManager()
 	cfg, _ := manager.LoadConfig(configPath)
-	
+
 	log := logger.CreateLogger("", "info")
 	deps := interfaces.PoltergeistDependencies{
 		StateManager:   state.NewStateManager(tmpDir, log),
@@ -468,7 +469,7 @@ func TestConfigReload(t *testing.T) {
 
 	p := poltergeist.New(cfg, tmpDir, log, deps, configPath)
 	go p.Start("")
-	
+
 	time.Sleep(2 * time.Second)
 
 	// Update config with additional target
@@ -492,7 +493,7 @@ func TestConfigReload(t *testing.T) {
 
 	// Should handle config change
 	// In a real implementation, we would verify new target is active
-	
+
 	p.Stop()
 }
 
@@ -540,7 +541,7 @@ func TestPerformance(t *testing.T) {
 	log := logger.CreateLogger("", "info")
 	priorityEngine := queue.NewPriorityEngine(cfg.BuildScheduling, log)
 	buildQueue := queue.NewIntelligentBuildQueue(cfg.BuildScheduling, log, priorityEngine, nil)
-	
+
 	deps := interfaces.PoltergeistDependencies{
 		StateManager:   state.NewStateManager(tmpDir, log),
 		BuilderFactory: builders.NewBuilderFactory(),
@@ -549,15 +550,15 @@ func TestPerformance(t *testing.T) {
 	}
 
 	p := poltergeist.New(cfg, tmpDir, log, deps, "")
-	
+
 	start := time.Now()
 	go p.Start("")
-	
+
 	// Wait for initial builds
 	time.Sleep(10 * time.Second)
-	
+
 	duration := time.Since(start)
-	
+
 	// All targets should build within reasonable time
 	if duration > 30*time.Second {
 		t.Errorf("builds took too long: %v", duration)

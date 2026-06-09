@@ -281,7 +281,15 @@ func createTestConfig() *types.PoltergeistConfig {
 	return &types.PoltergeistConfig{
 		Version:     "1.0",
 		ProjectType: "test",
-		Targets:     []json.RawMessage{},
+		Targets: []json.RawMessage{
+			json.RawMessage(`{
+				"name": "test-target",
+				"type": "executable",
+				"buildCommand": "echo test",
+				"watchPaths": ["*.go"],
+				"outputPath": "bin/test"
+			}`),
+		},
 	}
 }
 
