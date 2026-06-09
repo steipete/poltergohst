@@ -77,10 +77,12 @@ func NewUnifiedClient(log logger.Logger, config *types.WatchmanConfig) *UnifiedC
 			if config.ExcludeDirs != nil {
 				client.fsnotifyWatcher.SetExclusions(config.ExcludeDirs)
 			}
-			if config.SettlingDelay > 0 {
-				client.fsnotifyWatcher.SetSettlingDelay(time.Duration(config.SettlingDelay) * time.Millisecond)
-			}
-		} else {
+				if config.SettlingDelay > 0 {
+					client.fsnotifyWatcher.SetSettlingDelay(time.Duration(config.SettlingDelay) * time.Millisecond)
+				}
+				// FSNotifyWatcher already settles and coalesces events before forwarding them.
+				client.settlingDelay = 0
+			} else {
 			log.Error(fmt.Sprintf("Failed to create fsnotify watcher: %v", err))
 		}
 	}
