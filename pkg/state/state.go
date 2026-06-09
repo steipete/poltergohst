@@ -84,7 +84,7 @@ func (sm *StateManager) InitializeState(target types.Target) (*PoltergeistState,
 	}
 
 	sm.states[target.GetName()] = state
-	return state, nil
+	return cloneState(state), nil
 }
 
 // ReadState reads the state for a target
@@ -93,8 +93,9 @@ func (sm *StateManager) ReadState(targetName string) (*PoltergeistState, error) 
 
 	// Check memory cache first
 	if state, ok := sm.states[targetName]; ok {
+		result := cloneState(state)
 		sm.mu.RUnlock()
-		return state, nil
+		return result, nil
 	}
 	sm.mu.RUnlock()
 
@@ -166,28 +167,31 @@ func (sm *StateManager) UpdateState(targetName string, updates map[string]interf
 
 // UpdateBuildStatus updates the build status for a target
 func (sm *StateManager) UpdateBuildStatus(targetName string, status types.BuildStatus) error {
-	updates := map[string]interface{}{
-		"buildStatus": status,
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	state, ok := sm.states[targetName]
+	if !ok {
+		var err error
+		state, err = sm.loadStateFile(targetName)
+		if err != nil {
+			return fmt.Errorf("target state not found: %s", targetName)
+		}
+		sm.states[targetName] = state
 	}
 
+	state.BuildStatus = status
 	if status == types.BuildStatusSucceeded || status == types.BuildStatusFailed {
-		updates["lastBuildTime"] = time.Now()
-
-		// Update counters
-		sm.mu.RLock()
-		state, ok := sm.states[targetName]
-		sm.mu.RUnlock()
-
-		if ok {
-			if status == types.BuildStatusSucceeded {
-				updates["buildCount"] = state.BuildCount + 1
-			} else {
-				updates["failureCount"] = state.FailureCount + 1
-			}
+		state.LastBuildTime = time.Now()
+		if status == types.BuildStatusSucceeded {
+			state.BuildCount++
+		} else {
+			state.FailureCount++
 		}
 	}
+	state.Heartbeat = time.Now()
 
-	return sm.UpdateState(targetName, updates)
+	return sm.saveStateFile(state)
 }
 
 // RemoveState removes the state for a target
@@ -283,17 +287,19 @@ func (sm *StateManager) StartHeartbeat(ctx context.Context) {
 		return // Already running
 	}
 
-	sm.heartbeatStop = make(chan struct{})
-	sm.heartbeatTimer = time.NewTicker(10 * time.Second)
+	stop := make(chan struct{})
+	ticker := time.NewTicker(10 * time.Second)
+	sm.heartbeatStop = stop
+	sm.heartbeatTimer = ticker
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-sm.heartbeatStop:
+			case <-stop:
 				return
-			case <-sm.heartbeatTimer.C:
+			case <-ticker.C:
 				sm.updateHeartbeats()
 			}
 		}
@@ -303,16 +309,17 @@ func (sm *StateManager) StartHeartbeat(ctx context.Context) {
 // StopHeartbeat stops the heartbeat updater
 func (sm *StateManager) StopHeartbeat() {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
+	ticker := sm.heartbeatTimer
+	stop := sm.heartbeatStop
+	sm.heartbeatTimer = nil
+	sm.heartbeatStop = nil
+	sm.mu.Unlock()
 
-	if sm.heartbeatTimer != nil {
-		sm.heartbeatTimer.Stop()
-		sm.heartbeatTimer = nil
+	if ticker != nil {
+		ticker.Stop()
 	}
-
-	if sm.heartbeatStop != nil {
-		close(sm.heartbeatStop)
-		sm.heartbeatStop = nil
+	if stop != nil {
+		close(stop)
 	}
 }
 
@@ -394,4 +401,20 @@ func (sm *StateManager) updateHeartbeats() {
 				logger.WithField("error", err))
 		}
 	}
+}
+
+func cloneState(state *PoltergeistState) *PoltergeistState {
+	if state == nil {
+		return nil
+	}
+
+	result := *state
+	result.ChangedFiles = append([]string(nil), state.ChangedFiles...)
+	if state.Metadata != nil {
+		result.Metadata = make(map[string]interface{}, len(state.Metadata))
+		for key, value := range state.Metadata {
+			result.Metadata[key] = value
+		}
+	}
+	return &result
 }

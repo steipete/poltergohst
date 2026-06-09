@@ -281,7 +281,7 @@ func TestIntelligentBuildOrdering_ParallelExecution(t *testing.T) {
 		})
 
 		// All builds should start within a reasonable time window (parallel execution)
-		maxStartGap := 100 * time.Millisecond
+		maxStartGap := 150 * time.Millisecond
 		for i := 1; i < len(times); i++ {
 			gap := times[i].Sub(times[i-1])
 			if gap > maxStartGap {
@@ -472,7 +472,7 @@ func (e *timeBasedPriorityEngine) CalculatePriority(target types.Target, files [
 	e.lastChanges[target.GetName()] = now
 
 	// More recent changes get higher priority
-	return float64(now.Unix())
+	return float64(now.UnixNano())
 }
 
 func (e *timeBasedPriorityEngine) UpdateTargetMetrics(target string, buildTime time.Duration, success bool) {

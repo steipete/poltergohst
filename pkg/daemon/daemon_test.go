@@ -138,10 +138,15 @@ func TestDaemon_Restart(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Get original status
-	originalStatus, _ := d.Status()
-	originalPID := 0
-	if originalStatus != nil {
-		originalPID = originalStatus.PID
+	originalStatus, err := d.Status()
+	if err != nil {
+		t.Fatalf("failed to get daemon status: %v", err)
+	}
+	if originalStatus == nil {
+		t.Fatal("expected daemon to be running before restart")
+	}
+	if originalStatus.PID != os.Getpid() {
+		t.Fatalf("expected daemon PID %d, got %d", os.Getpid(), originalStatus.PID)
 	}
 
 	// Restart daemon
@@ -152,12 +157,15 @@ func TestDaemon_Restart(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Check if daemon is running with new PID
-	newStatus, _ := d.Status()
+	// Check if daemon is running in the same process after restart
+	newStatus, err := d.Status()
+	if err != nil {
+		t.Fatalf("failed to get restarted daemon status: %v", err)
+	}
 	if newStatus == nil {
 		t.Error("expected daemon to be running after restart")
-	} else if newStatus.PID == originalPID && originalPID != 0 {
-		t.Error("expected daemon to have new PID after restart")
+	} else if newStatus.PID != originalStatus.PID {
+		t.Errorf("expected daemon PID %d after restart, got %d", originalStatus.PID, newStatus.PID)
 	}
 
 	// Clean up
@@ -337,5 +345,14 @@ func TestDaemon_InvalidConfig(t *testing.T) {
 	err := d.Start()
 	if err == nil {
 		t.Error("expected error when starting with invalid config")
+	}
+
+	if d.IsRunning() {
+		t.Error("expected daemon not to be running after failed start")
+	}
+
+	pidFile := filepath.Join(tmpDir, ".poltergeist", "daemon.pid")
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("expected PID file to be removed after failed start, got %v", err)
 	}
 }

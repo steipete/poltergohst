@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	poltergeist "github.com/poltergeist/poltergeist/internal/engine"
 	"github.com/poltergeist/poltergeist/pkg/interfaces"
 	"github.com/poltergeist/poltergeist/pkg/logger"
-	"github.com/poltergeist/poltergeist/pkg/poltergeist"
 	"github.com/poltergeist/poltergeist/pkg/process"
 	"github.com/poltergeist/poltergeist/pkg/types"
 )
@@ -24,11 +24,14 @@ type Manager struct {
 	configPath     string
 	pidFile        string
 	logFile        string
+	logLevel       string
 	stateDir       string
 	logger         logger.Logger
 	processManager *process.Manager
 	poltergeist    *poltergeist.Poltergeist
+	cancel         context.CancelFunc
 	mu             sync.RWMutex
+	running        bool
 }
 
 // Config represents daemon configuration
@@ -44,17 +47,13 @@ func NewManager(config Config) *Manager {
 	stateDir := filepath.Join(config.ProjectRoot, ".poltergeist")
 	pidFile := filepath.Join(stateDir, "daemon.pid")
 
-	// Create logger
-	log := logger.CreateLogger(config.LogFile, config.LogLevel)
-
 	return &Manager{
-		projectRoot:    config.ProjectRoot,
-		configPath:     config.ConfigPath,
-		pidFile:        pidFile,
-		logFile:        config.LogFile,
-		stateDir:       stateDir,
-		logger:         log,
-		processManager: process.NewManager(log),
+		projectRoot: config.ProjectRoot,
+		configPath:  config.ConfigPath,
+		pidFile:     pidFile,
+		logFile:     config.LogFile,
+		logLevel:    config.LogLevel,
+		stateDir:    stateDir,
 	}
 }
 
@@ -67,6 +66,29 @@ func (m *Manager) StartWithContext(ctx context.Context) error {
 	if m.isRunning() {
 		return ErrDaemonAlreadyRunning
 	}
+	m.initializeRuntime()
+
+	started := false
+	defer func() {
+		if started {
+			return
+		}
+		if m.poltergeist != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			m.poltergeist.StopWithContext(shutdownCtx)
+			cancel()
+			_ = m.poltergeist.Cleanup()
+		}
+		if m.cancel != nil {
+			m.cancel()
+			m.cancel = nil
+		}
+		m.processManager.Stop()
+		m.removePIDFile()
+		m.poltergeist = nil
+		m.running = false
+		m.closeRuntime()
+	}()
 
 	// Ensure state directory exists
 	if err := os.MkdirAll(m.stateDir, 0755); err != nil {
@@ -77,6 +99,9 @@ func (m *Manager) StartWithContext(ctx context.Context) error {
 	if err := m.writePIDFile(); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	m.cancel = cancel
 
 	// Load configuration
 	cfg, err := m.loadConfig()
@@ -99,18 +124,19 @@ func (m *Manager) StartWithContext(ctx context.Context) error {
 	})
 
 	// Start process manager with context
-	m.processManager.Start(ctx)
+	m.processManager.Start(runCtx)
 
 	// Start Poltergeist with context
-	if err := m.poltergeist.StartWithContext(ctx, ""); err != nil {
-		m.removePIDFile()
+	if err := m.poltergeist.StartWithContext(runCtx, ""); err != nil {
 		return fmt.Errorf("failed to start Poltergeist: %w", err)
 	}
 
+	m.running = true
+	started = true
 	m.logger.Info("Daemon started successfully")
 
 	// Run in background with context
-	go m.runWithContext(ctx)
+	go m.runWithContext(runCtx, m.logger)
 
 	return nil
 }
@@ -128,6 +154,7 @@ func (m *Manager) StopWithContext(ctx context.Context) error {
 	if !m.isRunning() {
 		return ErrDaemonNotRunning
 	}
+	m.initializeRuntime()
 
 	m.logger.Info("Stopping daemon...")
 
@@ -137,13 +164,21 @@ func (m *Manager) StopWithContext(ctx context.Context) error {
 		m.poltergeist.Cleanup()
 	}
 
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+
 	// Stop process manager
 	m.processManager.Stop()
 
 	// Remove PID file
 	m.removePIDFile()
+	m.poltergeist = nil
+	m.running = false
 
 	m.logger.Info("Daemon stopped")
+	m.closeRuntime()
 
 	return nil
 }
@@ -212,10 +247,10 @@ func (m *Manager) IsRunning() bool {
 
 // Private methods
 
-func (m *Manager) runWithContext(ctx context.Context) {
+func (m *Manager) runWithContext(ctx context.Context, log logger.Logger) {
 	// Keep daemon running until context is cancelled
 	<-ctx.Done()
-	m.logger.Info("Daemon context cancelled", logger.WithField("reason", ctx.Err()))
+	log.Info("Daemon context cancelled", logger.WithField("reason", ctx.Err()))
 }
 
 // Deprecated: Use runWithContext instead
@@ -225,6 +260,10 @@ func (m *Manager) run() {
 }
 
 func (m *Manager) isRunning() bool {
+	if m.running {
+		return true
+	}
+
 	pid, err := m.readPIDFile()
 	if err != nil {
 		return false
@@ -239,6 +278,20 @@ func (m *Manager) isRunning() bool {
 	// Check if process is alive
 	err = proc.Signal(os.Signal(nil))
 	return err == nil
+}
+
+func (m *Manager) initializeRuntime() {
+	if m.logger != nil {
+		return
+	}
+	m.logger = logger.CreateLogger(m.logFile, m.logLevel)
+	m.processManager = process.NewManager(m.logger)
+}
+
+func (m *Manager) closeRuntime() {
+	_ = logger.Close(m.logger)
+	m.logger = nil
+	m.processManager = nil
 }
 
 func (m *Manager) writePIDFile() error {

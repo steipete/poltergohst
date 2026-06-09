@@ -346,7 +346,7 @@ func TestTargetValidator_ValidateWatchPaths(t *testing.T) {
 		},
 		{
 			name:          "absolute watch path",
-			watchPaths:    []string{"/absolute/path/*.go"},
+			watchPaths:    []string{filepath.Join(tempDir, "absolute", "*.go")},
 			expectWarning: true,
 		},
 		{

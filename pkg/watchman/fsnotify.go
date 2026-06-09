@@ -16,16 +16,30 @@ import (
 
 // FSNotifyWatcher provides file watching using fsnotify
 type FSNotifyWatcher struct {
-	watcher       *fsnotify.Watcher
-	logger        logger.Logger
-	patterns      []string
-	exclusions    []string
-	callbacks     map[string]func(FileEvent)
-	settling      time.Duration
-	pendingEvents map[string]time.Time
-	mu            sync.RWMutex
-	ctx           context.Context
-	cancel        context.CancelFunc
+	watcher        *fsnotify.Watcher
+	logger         logger.Logger
+	patterns       []string
+	exclusions     []string
+	callbacks      map[string]func(FileEvent)
+	pendingWatches map[string]*pendingWatch
+	settling       time.Duration
+	pendingEvents  map[string]pendingFSEvent
+	nextGeneration uint64
+	mu             sync.RWMutex
+	processOnce    sync.Once
+	ctx            context.Context
+	cancel         context.CancelFunc
+}
+
+type pendingFSEvent struct {
+	event      fsnotify.Event
+	generation uint64
+}
+
+type pendingWatch struct {
+	callback  func(FileEvent)
+	events    []FileEvent
+	committed bool
 }
 
 // NewFSNotifyWatcher creates a new fsnotify-based watcher
@@ -38,13 +52,14 @@ func NewFSNotifyWatcher(log logger.Logger) (*FSNotifyWatcher, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &FSNotifyWatcher{
-		watcher:       watcher,
-		logger:        log,
-		callbacks:     make(map[string]func(FileEvent)),
-		pendingEvents: make(map[string]time.Time),
-		settling:      100 * time.Millisecond, // Default settling time
-		ctx:           ctx,
-		cancel:        cancel,
+		watcher:        watcher,
+		logger:         log,
+		callbacks:      make(map[string]func(FileEvent)),
+		pendingWatches: make(map[string]*pendingWatch),
+		pendingEvents:  make(map[string]pendingFSEvent),
+		settling:       100 * time.Millisecond, // Default settling time
+		ctx:            ctx,
+		cancel:         cancel,
 	}, nil
 }
 
@@ -77,18 +92,15 @@ func (f *FSNotifyWatcher) SetSettlingDelay(delay time.Duration) {
 
 // Watch starts watching a directory
 func (f *FSNotifyWatcher) Watch(root string, callback func(FileEvent)) error {
-	// Store callback
-	f.mu.Lock()
-	f.callbacks[root] = callback
-	f.mu.Unlock()
+	f.beginWatch(root, callback)
+	f.startProcessing()
 
 	// Add root directory
 	if err := f.addDirectory(root); err != nil {
+		f.abortWatch(root)
 		return fmt.Errorf("failed to watch %s: %w", root, err)
 	}
-
-	// Start event processing
-	go f.processEvents()
+	f.commitWatch(root)
 
 	f.logger.Info(fmt.Sprintf("Started watching %s with fsnotify", root))
 	return nil
@@ -96,6 +108,11 @@ func (f *FSNotifyWatcher) Watch(root string, callback func(FileEvent)) error {
 
 // WatchProject watches an entire project directory recursively
 func (f *FSNotifyWatcher) WatchProject(projectPath string, callback func(FileEvent)) error {
+	f.beginWatch(projectPath, callback)
+	// Windows can emit events while directories are being registered. Consume
+	// them before walking so fsnotify's backend cannot block a later Add call.
+	f.startProcessing()
+
 	// Walk the directory tree and add all directories
 	err := filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -123,18 +140,74 @@ func (f *FSNotifyWatcher) WatchProject(projectPath string, callback func(FileEve
 	})
 
 	if err != nil {
+		f.abortWatch(projectPath)
 		return fmt.Errorf("failed to walk project directory: %w", err)
 	}
-
-	// Store callback for this project
-	f.mu.Lock()
-	f.callbacks[projectPath] = callback
-	f.mu.Unlock()
-
-	// Start event processing if not already started
-	go f.processEvents()
+	f.commitWatch(projectPath)
 
 	return nil
+}
+
+func (f *FSNotifyWatcher) startProcessing() {
+	f.processOnce.Do(func() {
+		go f.processEvents()
+	})
+}
+
+func (f *FSNotifyWatcher) beginWatch(root string, callback func(FileEvent)) {
+	f.mu.Lock()
+	f.pendingWatches[root] = &pendingWatch{callback: callback}
+	f.mu.Unlock()
+}
+
+func (f *FSNotifyWatcher) commitWatch(root string) {
+	f.mu.Lock()
+	pending := f.pendingWatches[root]
+	if pending == nil {
+		f.mu.Unlock()
+		return
+	}
+	pending.committed = true
+	f.mu.Unlock()
+
+	go f.activateWatch(root, pending)
+}
+
+func (f *FSNotifyWatcher) activateWatch(root string, pending *pendingWatch) {
+	for {
+		f.mu.Lock()
+		current := f.pendingWatches[root]
+		if current != pending || !pending.committed {
+			f.mu.Unlock()
+			return
+		}
+		if len(pending.events) == 0 {
+			f.callbacks[root] = pending.callback
+			delete(f.pendingWatches, root)
+			f.mu.Unlock()
+			return
+		}
+		event := pending.events[0]
+		pending.events = pending.events[1:]
+		f.mu.Unlock()
+
+		pending.callback(event)
+	}
+}
+
+func (f *FSNotifyWatcher) abortWatch(root string) {
+	f.mu.Lock()
+	pending := f.pendingWatches[root]
+	delete(f.pendingWatches, root)
+	var events []FileEvent
+	if pending != nil {
+		events = append(events, pending.events...)
+	}
+	f.mu.Unlock()
+
+	for _, event := range events {
+		f.dispatchEvent(event)
+	}
 }
 
 // addDirectory adds a directory to the watcher
@@ -208,15 +281,23 @@ func (f *FSNotifyWatcher) processEvents() {
 // handleEventWithSettling handles an event with settling delay
 func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 	f.mu.Lock()
-	f.pendingEvents[event.Name] = time.Now()
+	if pending, exists := f.pendingEvents[event.Name]; exists {
+		event.Op |= pending.event.Op
+	}
+	f.nextGeneration++
+	generation := f.nextGeneration
+	f.pendingEvents[event.Name] = pendingFSEvent{
+		event:      event,
+		generation: generation,
+	}
 	settlingDelay := f.settling
 	f.mu.Unlock()
 
 	// Schedule event processing after settling delay
 	time.AfterFunc(settlingDelay, func() {
 		f.mu.Lock()
-		lastEventTime, exists := f.pendingEvents[event.Name]
-		if !exists || time.Since(lastEventTime) < settlingDelay {
+		pending, exists := f.pendingEvents[event.Name]
+		if !exists || pending.generation != generation {
 			// Event was updated or removed, skip
 			f.mu.Unlock()
 			return
@@ -225,7 +306,7 @@ func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 		f.mu.Unlock()
 
 		// Convert and dispatch event
-		fileEvent := f.convertEvent(event)
+		fileEvent := f.convertEvent(pending.event)
 		f.dispatchEvent(fileEvent)
 	})
 }
@@ -266,8 +347,7 @@ func (f *FSNotifyWatcher) convertEvent(event fsnotify.Event) FileEvent {
 
 // dispatchEvent dispatches an event to the appropriate callback
 func (f *FSNotifyWatcher) dispatchEvent(event FileEvent) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
 
 	// Find the best matching callback
 	var bestMatch string
@@ -281,6 +361,22 @@ func (f *FSNotifyWatcher) dispatchEvent(event FileEvent) {
 			}
 		}
 	}
+
+	var bestPending *pendingWatch
+	for root, pending := range f.pendingWatches {
+		if strings.HasPrefix(event.Path, root) && len(root) > len(bestMatch) {
+			bestMatch = root
+			bestCallback = nil
+			bestPending = pending
+		}
+	}
+
+	if bestPending != nil {
+		bestPending.events = append(bestPending.events, event)
+		f.mu.Unlock()
+		return
+	}
+	f.mu.Unlock()
 
 	if bestCallback != nil {
 		bestCallback(event)
@@ -358,9 +454,33 @@ func (f *FSNotifyWatcher) matchesPattern(path string) bool {
 func (f *FSNotifyWatcher) Remove(path string) error {
 	f.mu.Lock()
 	delete(f.callbacks, path)
+	delete(f.pendingWatches, path)
 	f.mu.Unlock()
 
-	return f.watcher.Remove(path)
+	watchedPaths := f.watcher.WatchList()
+	removed := false
+	var firstErr error
+	for _, watchedPath := range watchedPaths {
+		if !pathWithinRoot(watchedPath, path) {
+			continue
+		}
+		removed = true
+		if err := f.watcher.Remove(watchedPath); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if !removed {
+		return f.watcher.Remove(path)
+	}
+	return firstErr
+}
+
+func pathWithinRoot(path, root string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 // List returns all watched paths

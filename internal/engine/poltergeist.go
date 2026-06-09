@@ -241,6 +241,7 @@ func (p *Poltergeist) start(targetName string) error {
 	if err := p.performInitialBuilds(); err != nil {
 		p.logger.Warn("Initial builds encountered errors", logger.WithField("error", err))
 	}
+	p.watchman.StartEventReceiver()
 
 	p.logger.Info("Poltergeist is now watching for changes...")
 

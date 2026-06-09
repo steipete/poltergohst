@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,12 +272,19 @@ func TestDockerBuilder(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("Docker not available")
 	}
+	info, err := exec.Command("docker", "info", "--format", "{{.OSType}}").Output()
+	if err != nil {
+		t.Skip("Docker daemon not available")
+	}
+	if strings.TrimSpace(string(info)) != "linux" {
+		t.Skip("Linux container engine not available")
+	}
 
 	tmpDir := t.TempDir()
 
 	// Create a simple Dockerfile
 	dockerfile := filepath.Join(tmpDir, "Dockerfile")
-	err := os.WriteFile(dockerfile, []byte(`
+	err = os.WriteFile(dockerfile, []byte(`
 		FROM alpine:latest
 		CMD ["echo", "test"]
 	`), 0644)

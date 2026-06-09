@@ -22,6 +22,7 @@ type Manager struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	running bool
+	stop    chan struct{}
 }
 
 // NewManager creates a new process manager
@@ -50,44 +51,49 @@ func (m *Manager) Start(ctx context.Context) {
 		return
 	}
 	m.running = true
+	stop := make(chan struct{})
+	m.stop = stop
+	var heartbeatStop chan struct{}
+	m.wg.Add(1)
+	if m.heartbeatFunc != nil {
+		heartbeatStop = make(chan struct{})
+		m.heartbeatStop = heartbeatStop
+		m.wg.Add(1)
+	}
 	m.mu.Unlock()
 
 	// Handle OS signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 
-	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
+		defer signal.Stop(sigChan)
 
 		select {
 		case <-ctx.Done():
-			m.handleShutdown()
+			if m.beginShutdown() {
+				m.handleShutdown()
+			}
 		case sig := <-sigChan:
-			m.logger.Info("Received signal", logger.WithField("signal", sig))
-			m.handleShutdown()
+			if m.beginShutdown() {
+				m.logger.Info("Received signal", logger.WithField("signal", sig))
+				m.handleShutdown()
+			}
+		case <-stop:
 		}
 	}()
 
 	// Start heartbeat if configured
-	if m.heartbeatFunc != nil {
-		m.startHeartbeat(ctx)
+	if heartbeatStop != nil {
+		go m.runHeartbeat(ctx, heartbeatStop)
 	}
 }
 
 // Stop stops the process manager
 func (m *Manager) Stop() {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
+	if !m.beginShutdown() {
 		return
-	}
-	m.running = false
-	m.mu.Unlock()
-
-	// Stop heartbeat
-	if m.heartbeatStop != nil {
-		close(m.heartbeatStop)
 	}
 
 	// Wait for goroutines
@@ -117,7 +123,6 @@ func (m *Manager) handleShutdown() {
 	m.mu.Lock()
 	handlers := make([]func(), len(m.shutdownHandlers))
 	copy(handlers, m.shutdownHandlers)
-	m.running = false
 	m.mu.Unlock()
 
 	for i := len(handlers) - 1; i >= 0; i-- {
@@ -125,30 +130,50 @@ func (m *Manager) handleShutdown() {
 	}
 }
 
-func (m *Manager) startHeartbeat(ctx context.Context) {
-	m.heartbeatStop = make(chan struct{})
+func (m *Manager) beginShutdown() bool {
+	m.mu.Lock()
+	if !m.running {
+		m.mu.Unlock()
+		return false
+	}
+
+	m.running = false
+	stop := m.stop
+	m.stop = nil
+	heartbeatStop := m.heartbeatStop
+	m.heartbeatStop = nil
+	m.mu.Unlock()
+
+	close(stop)
+	if heartbeatStop != nil {
+		close(heartbeatStop)
+	}
+
+	return true
+}
+
+func (m *Manager) runHeartbeat(ctx context.Context, stop <-chan struct{}) {
+	defer m.wg.Done()
+
 	interval := 10 * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-m.heartbeatStop:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if m.heartbeatFunc != nil {
-					m.heartbeatFunc()
-				}
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			heartbeat := m.heartbeatFunc
+			m.mu.Unlock()
+			if heartbeat != nil {
+				heartbeat()
 			}
 		}
-	}()
+	}
 }
 
 // ProcessInfo represents information about a running process

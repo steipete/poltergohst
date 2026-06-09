@@ -71,19 +71,22 @@ func runInit(projectType string, force bool) error {
 
 func detectProjectType() string {
 	// Check for various project files
-	checks := map[string]string{
-		"Package.swift":    "swift",
-		"package.json":     "node",
-		"Cargo.toml":       "rust",
-		"pyproject.toml":   "python",
-		"requirements.txt": "python",
-		"CMakeLists.txt":   "cmake",
-		"Makefile":         "mixed",
+	checks := []struct {
+		file        string
+		projectType string
+	}{
+		{"Package.swift", "swift"},
+		{"package.json", "node"},
+		{"Cargo.toml", "rust"},
+		{"pyproject.toml", "python"},
+		{"requirements.txt", "python"},
+		{"CMakeLists.txt", "cmake"},
+		{"Makefile", "mixed"},
 	}
 
-	for file, projectType := range checks {
-		if _, err := os.Stat(filepath.Join(projectRoot, file)); err == nil {
-			return projectType
+	for _, check := range checks {
+		if _, err := os.Stat(filepath.Join(projectRoot, check.file)); err == nil {
+			return check.projectType
 		}
 	}
 

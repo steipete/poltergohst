@@ -9,50 +9,76 @@ on:
     types: [ created ]
 
 env:
-  GO_VERSION: '1.22'
+  GO_VERSION: '1.26.4'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
       
+      - name: Determine lint baseline
+        id: lint-base
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            candidate="$BASE_SHA"
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            candidate="$BEFORE_SHA"
+          else
+            candidate="HEAD~1"
+          fi
+
+          if [[ "$candidate" =~ ^0+$ ]] || ! git cat-file -e "$candidate^{commit}" 2>/dev/null; then
+            candidate="HEAD~1"
+          fi
+
+          echo "rev=$candidate" >> "$GITHUB_OUTPUT"
+
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
-          args: --timeout=5m
+          version: v2.12.2
+          args: --timeout=5m --new-from-rev=${{ steps.lint-base.outputs.rev }}
 
   test:
     name: Test
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ['1.21', '1.22']
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go }}
+          go-version: ${{ env.GO_VERSION }}
       
       - name: Get dependencies
         run: go mod download
       
       - name: Run tests
+        shell: bash
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
       
       - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.go == env.GO_VERSION
-        uses: codecov/codecov-action@v3
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.txt
+          files: ./coverage.txt
 
   build:
     name: Build
@@ -62,15 +88,15 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
       
       - name: Build binary
-        run: go build -v -o poltergeist${{ matrix.os == 'windows-latest' && '.exe' || '' }} cmd/poltergeist/main.go
-      
+        run: go build -v -o poltergeist${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/poltergeist
+
       - name: Test binary
         run: ./poltergeist${{ matrix.os == 'windows-latest' && '.exe' || '' }} --version
 
@@ -80,9 +106,9 @@ jobs:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
       
@@ -91,7 +117,7 @@ jobs:
           make release
       
       - name: Upload release assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
         env:

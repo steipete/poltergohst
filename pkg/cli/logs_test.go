@@ -98,10 +98,10 @@ func TestRunLogs_NonexistentTarget(t *testing.T) {
 	// Create log directory with sample logs
 	setupTestLogs(t, tempDir, sampleLogEntries)
 
-	// Test with nonexistent target - should not error but show no logs
+	// A named target should report that its log does not exist.
 	err := runLogs("nonexistent-target", false, 50)
-	if err != nil {
-		t.Errorf("runLogs should not error for nonexistent target: %v", err)
+	if err == nil {
+		t.Error("Expected error for nonexistent target")
 	}
 }
 
@@ -111,10 +111,10 @@ func TestRunLogs_NoLogDirectory(t *testing.T) {
 	projectRoot = tempDir
 	defer func() { projectRoot = originalProjectRoot }()
 
-	// Don't create log directory - should handle gracefully
+	// A project that has not logged yet should be handled gracefully.
 	err := runLogs("", false, 50)
-	if err == nil {
-		t.Error("Expected error when log directory doesn't exist")
+	if err != nil {
+		t.Errorf("runLogs should handle a missing log directory: %v", err)
 	}
 }
 

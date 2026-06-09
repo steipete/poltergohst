@@ -6,7 +6,7 @@
 
 *Your helpful ghost that watches your files and rebuilds your projects*
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20|%20Linux%20|%20Windows-lightgrey?style=for-the-badge)](https://github.com/steipete/poltergeist)
 
@@ -67,7 +67,7 @@ Commands have been designed with the least surprises:
 
 ### Installation
 
-#### From Source (Go 1.22+)
+#### From Source (Go 1.25+)
 
 ```bash
 # Clone the repository
@@ -299,7 +299,7 @@ A native macOS menu bar application is available for monitoring all Poltergeist 
 
 ### Requirements
 
-- Go 1.22 or later
+- Go 1.25 or later
 - Watchman (optional, falls back to fsnotify)
 - macOS 14+ for the monitor app
 
