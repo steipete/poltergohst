@@ -16,19 +16,30 @@ import (
 
 // UnifiedClient provides file watching with Watchman or fsnotify fallback
 type UnifiedClient struct {
-	logger          logger.Logger
-	watchmanConn    *WatchmanConnection
-	fsnotifyWatcher *FSNotifyWatcher
-	useWatchman     bool
-	subscriptions   map[string]*subscription
-	projectRoot     string
-	config          *types.WatchmanConfig
-	mu              sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
-	eventChan       chan FileEvent
-	settlingDelay   time.Duration
-	receiverStarted bool
+	logger           logger.Logger
+	watchmanConn     *WatchmanConnection
+	fsnotifyWatcher  *FSNotifyWatcher
+	useWatchman      bool
+	subscriptions    map[string]*subscription
+	projectRoot      string
+	config           *types.WatchmanConfig
+	mu               sync.RWMutex
+	controlMu        sync.Mutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	eventChan        chan FileEvent
+	settlingDelay    time.Duration
+	receiverStarted  bool
+	pendingControl   chan controlResult
+	fsnotifyReady    bool
+	fsnotifyDraining bool
+	fsnotifyOverflow bool
+	pendingFSEvents  []FileEvent
+}
+
+type controlResult struct {
+	response *WatchmanResponse
+	err      error
 }
 
 type subscription struct {
@@ -115,13 +126,26 @@ func (c *UnifiedClient) Connect(ctx context.Context) error {
 // StartEventReceiver starts the goroutine that receives Watchman events
 // This should be called after all initial setup (WatchProject, Subscribe) is complete
 func (c *UnifiedClient) StartEventReceiver() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.controlMu.Lock()
+	defer c.controlMu.Unlock()
 
+	c.mu.Lock()
+	startFSNotifyDrain := false
 	if c.useWatchman && c.watchmanConn != nil && !c.receiverStarted {
 		c.receiverStarted = true
 		go c.receiveWatchmanEvents()
 		c.logger.Debug("Started Watchman event receiver goroutine")
+	} else if !c.useWatchman && c.fsnotifyWatcher != nil && !c.fsnotifyReady {
+		c.fsnotifyReady = true
+		if len(c.pendingFSEvents) > 0 {
+			c.fsnotifyDraining = true
+			startFSNotifyDrain = true
+		}
+	}
+	c.mu.Unlock()
+
+	if startFSNotifyDrain {
+		go c.drainFSNotifyEvents()
 	}
 }
 
@@ -147,27 +171,30 @@ func (c *UnifiedClient) WatchProject(projectPath string) error {
 	c.mu.Unlock()
 
 	if c.useWatchman {
+		c.controlMu.Lock()
+		defer c.controlMu.Unlock()
+
 		c.logger.Debug(fmt.Sprintf("Sending watch-project command for: %s", projectPath))
-		resp, err := c.watchmanConn.WatchProject(projectPath)
+		resp, err := c.sendWatchmanCommandLocked(WatchmanCommand{"watch-project", projectPath})
 		if err != nil {
 			c.logger.Error(fmt.Sprintf("watch-project failed: %v", err))
 			return fmt.Errorf("failed to watch project: %w", err)
 		}
 		c.logger.Debug(fmt.Sprintf("watch-project response received: %+v", resp))
 
-		c.mu.Lock()
+		watchedRoot := resp.Watch
 		if resp.RelativeRoot != "" {
-			c.projectRoot = filepath.Join(resp.Watch, resp.RelativeRoot)
-		} else {
-			c.projectRoot = resp.Watch
+			watchedRoot = filepath.Join(resp.Watch, resp.RelativeRoot)
 		}
+		c.mu.Lock()
+		c.projectRoot = watchedRoot
 		c.mu.Unlock()
 
-		c.logger.Info(fmt.Sprintf("Watching project with Watchman: %s", c.projectRoot))
+		c.logger.Info(fmt.Sprintf("Watching project with Watchman: %s", watchedRoot))
 	} else if c.fsnotifyWatcher != nil {
 		// Set up fsnotify watching
 		err := c.fsnotifyWatcher.WatchProject(projectPath, func(event FileEvent) {
-			c.eventChan <- event
+			c.handleFSNotifyEvent(event)
 		})
 		if err != nil {
 			return fmt.Errorf("failed to watch project with fsnotify: %w", err)
@@ -200,9 +227,6 @@ func (c *UnifiedClient) subscribe(
 	eventCallback func(FileEvent),
 	exclusions []interfaces.ExclusionExpression,
 ) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	// Create subscription record
 	sub := &subscription{
 		name:          name,
@@ -213,6 +237,9 @@ func (c *UnifiedClient) subscribe(
 	}
 
 	if c.useWatchman {
+		c.controlMu.Lock()
+		defer c.controlMu.Unlock()
+
 		// Build Watchman query
 		var expressions []Expression
 		var finalExpr Expression
@@ -251,7 +278,7 @@ func (c *UnifiedClient) subscribe(
 			}
 
 			// Add default exclusions from config
-			if c.config.UseDefaultExclusions {
+			if c.config != nil && c.config.UseDefaultExclusions {
 				for _, dir := range getDefaultExclusions() {
 					exclusionExprs = append(exclusionExprs,
 						MatchExpression(fmt.Sprintf("**/%s/**", dir), true))
@@ -272,10 +299,12 @@ func (c *UnifiedClient) subscribe(
 		}
 
 		// Get initial clock
-		clock, err := c.watchmanConn.Clock(root)
+		clockResp, err := c.sendWatchmanCommandLocked(WatchmanCommand{"clock", root})
+		clock := ""
 		if err != nil {
 			c.logger.Warn(fmt.Sprintf("Failed to get clock: %v", err))
-			clock = ""
+		} else {
+			clock = clockResp.Clock
 		}
 
 		// Create Watchman subscription
@@ -286,7 +315,19 @@ func (c *UnifiedClient) subscribe(
 			Empty:      true,
 		}
 
-		if _, err := c.watchmanConn.Subscribe(root, name, sub.query); err != nil {
+		c.mu.Lock()
+		previous, hadPrevious := c.subscriptions[name]
+		c.subscriptions[name] = sub
+		c.mu.Unlock()
+
+		if _, err := c.sendWatchmanCommandLocked(WatchmanCommand{"subscribe", root, name, sub.query}); err != nil {
+			c.mu.Lock()
+			if hadPrevious {
+				c.subscriptions[name] = previous
+			} else {
+				delete(c.subscriptions, name)
+			}
+			c.mu.Unlock()
 			return fmt.Errorf("failed to create Watchman subscription: %w", err)
 		}
 
@@ -300,29 +341,188 @@ func (c *UnifiedClient) subscribe(
 		// The callback is registered there
 	}
 
-	c.subscriptions[name] = sub
+	if !c.useWatchman {
+		c.mu.Lock()
+		c.subscriptions[name] = sub
+		c.mu.Unlock()
+	}
 	c.logger.Debug(fmt.Sprintf("Created subscription: %s", name))
 
 	return nil
 }
 
-// Unsubscribe removes a subscription
-func (c *UnifiedClient) Unsubscribe(subscriptionName string) error {
+func (c *UnifiedClient) handleFSNotifyEvent(event FileEvent) {
 	c.mu.Lock()
-	sub, exists := c.subscriptions[subscriptionName]
-	if !exists {
+	if !c.fsnotifyReady || c.fsnotifyDraining {
+		c.queueFSNotifyEventLocked(event)
 		c.mu.Unlock()
-		return fmt.Errorf("subscription %s not found", subscriptionName)
+		return
 	}
-	delete(c.subscriptions, subscriptionName)
 	c.mu.Unlock()
 
-	if c.useWatchman && c.watchmanConn != nil {
-		err := c.watchmanConn.Unsubscribe(sub.root, subscriptionName)
-		return err
+	select {
+	case c.eventChan <- event:
+	case <-c.ctx.Done():
+	}
+}
+
+func (c *UnifiedClient) queueFSNotifyEventLocked(event FileEvent) {
+	for i := range c.pendingFSEvents {
+		if c.pendingFSEvents[i].Path != event.Path {
+			continue
+		}
+
+		copy(c.pendingFSEvents[i:], c.pendingFSEvents[i+1:])
+		c.pendingFSEvents[len(c.pendingFSEvents)-1] = event
+		return
 	}
 
+	limit := 0
+	if c.config != nil {
+		limit = c.config.MaxFileEvents
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	if len(c.pendingFSEvents) >= limit {
+		copy(c.pendingFSEvents, c.pendingFSEvents[1:])
+		c.pendingFSEvents[len(c.pendingFSEvents)-1] = event
+		if !c.fsnotifyOverflow {
+			c.fsnotifyOverflow = true
+			c.logger.Warn(fmt.Sprintf("Pending file events exceeded maxFileEvents (%d); dropping oldest events", limit))
+		}
+		return
+	}
+
+	c.pendingFSEvents = append(c.pendingFSEvents, event)
+}
+
+func (c *UnifiedClient) drainFSNotifyEvents() {
+	for {
+		c.mu.Lock()
+		if len(c.pendingFSEvents) == 0 {
+			c.fsnotifyDraining = false
+			c.mu.Unlock()
+			return
+		}
+		event := c.pendingFSEvents[0]
+		c.pendingFSEvents = c.pendingFSEvents[1:]
+		c.mu.Unlock()
+
+		select {
+		case c.eventChan <- event:
+		case <-c.ctx.Done():
+			return
+		}
+	}
+}
+
+// Unsubscribe removes a subscription
+func (c *UnifiedClient) Unsubscribe(subscriptionName string) error {
+	c.controlMu.Lock()
+	defer c.controlMu.Unlock()
+
+	c.mu.RLock()
+	sub, exists := c.subscriptions[subscriptionName]
+	c.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("subscription %s not found", subscriptionName)
+	}
+
+	if c.useWatchman && c.watchmanConn != nil {
+		_, err := c.sendWatchmanCommandLocked(WatchmanCommand{"unsubscribe", sub.root, subscriptionName})
+		if err != nil {
+			return err
+		}
+	}
+
+	c.mu.Lock()
+	delete(c.subscriptions, subscriptionName)
+	c.mu.Unlock()
 	return nil
+}
+
+func (c *UnifiedClient) sendWatchmanCommandLocked(command WatchmanCommand) (*WatchmanResponse, error) {
+	c.mu.RLock()
+	receiverStarted := c.receiverStarted
+	c.mu.RUnlock()
+	if !receiverStarted {
+		if err := c.watchmanConn.Send(command); err != nil {
+			return nil, err
+		}
+		for {
+			resp, err := c.watchmanConn.Receive()
+			if err != nil {
+				return resp, err
+			}
+			if c.handleWatchmanUnilateral(resp) {
+				continue
+			}
+			return resp, nil
+		}
+	}
+
+	resultChan := make(chan controlResult, 1)
+
+	c.mu.Lock()
+	c.pendingControl = resultChan
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		if c.pendingControl == resultChan {
+			c.pendingControl = nil
+		}
+		c.mu.Unlock()
+	}()
+
+	if err := c.watchmanConn.Send(command); err != nil {
+		return nil, err
+	}
+
+	select {
+	case result := <-resultChan:
+		return result.response, result.err
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
+	}
+}
+
+func (c *UnifiedClient) routeControlResponse(resp *WatchmanResponse, err error) bool {
+	if isWatchmanUnilateral(resp) {
+		return false
+	}
+
+	c.mu.Lock()
+	resultChan := c.pendingControl
+	if resultChan != nil {
+		c.pendingControl = nil
+	}
+	c.mu.Unlock()
+
+	if resultChan == nil {
+		return false
+	}
+
+	resultChan <- controlResult{response: resp, err: err}
+	return true
+}
+
+func isWatchmanUnilateral(resp *WatchmanResponse) bool {
+	return resp != nil && (resp.Unilateral || resp.Subscription != "")
+}
+
+func (c *UnifiedClient) handleWatchmanUnilateral(resp *WatchmanResponse) bool {
+	if !isWatchmanUnilateral(resp) {
+		return false
+	}
+	if resp.Subscription != "" {
+		c.logger.Debug(fmt.Sprintf("Received Watchman subscription event: %s with %d files",
+			resp.Subscription, len(resp.Files)))
+		c.handleWatchmanResponse(resp)
+	} else if resp.Log != "" {
+		c.logger.Debug(fmt.Sprintf("Watchman log: %s", resp.Log))
+	}
+	return true
 }
 
 // IsConnected checks if connected to file watcher
@@ -336,7 +536,14 @@ func (c *UnifiedClient) IsConnected() bool {
 // GetVersion returns the Watchman version or "fsnotify" for fallback
 func (c *UnifiedClient) GetVersion() (string, error) {
 	if c.useWatchman && c.watchmanConn != nil {
-		return c.watchmanConn.Version()
+		c.controlMu.Lock()
+		defer c.controlMu.Unlock()
+
+		resp, err := c.sendWatchmanCommandLocked(WatchmanCommand{"version"})
+		if err != nil {
+			return "", err
+		}
+		return resp.Version, nil
 	}
 	return "fsnotify", nil
 }
@@ -358,6 +565,13 @@ func (c *UnifiedClient) receiveWatchmanEvents() {
 
 			// Set read timeout to avoid blocking forever
 			resp, err := c.watchmanConn.Receive()
+			if c.routeControlResponse(resp, err) {
+				if err != nil && (strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "closed")) {
+					c.logger.Debug("Watchman connection closed, stopping event receiver")
+					return
+				}
+				continue
+			}
 			if err != nil {
 				if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "closed") {
 					c.logger.Debug("Watchman connection closed, stopping event receiver")
@@ -371,15 +585,7 @@ func (c *UnifiedClient) receiveWatchmanEvents() {
 				continue
 			}
 
-			// Process subscription notification
-			if resp.Subscription != "" {
-				c.logger.Debug(fmt.Sprintf("Received Watchman subscription event: %s with %d files",
-					resp.Subscription, len(resp.Files)))
-				c.handleWatchmanResponse(resp)
-			} else if resp.Log != "" {
-				// Log Watchman's log messages
-				c.logger.Debug(fmt.Sprintf("Watchman log: %s", resp.Log))
-			}
+			c.handleWatchmanUnilateral(resp)
 		}
 	}
 }
@@ -642,7 +848,11 @@ func (c *UnifiedClient) Watch(ctx context.Context, root string, patterns []strin
 		}
 	}
 
-	return c.subscribe(root, subscriptionName, config, nil, eventCallback, nil)
+	if err := c.subscribe(root, subscriptionName, config, nil, eventCallback, nil); err != nil {
+		return err
+	}
+	c.StartEventReceiver()
+	return nil
 }
 
 // List returns all watched paths

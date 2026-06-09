@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/poltergeist/poltergeist/pkg/types"
@@ -709,6 +710,9 @@ func TestRunInit_InvalidProjectType(t *testing.T) {
 }
 
 func TestRunInit_ReadOnlyDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix chmod write permissions")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("Skipping read-only test when running as root")
 	}

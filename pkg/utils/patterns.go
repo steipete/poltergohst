@@ -1,6 +1,7 @@
 package utils
 
 import (
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -277,10 +278,13 @@ func GetDefaultExclusions() []string {
 }
 
 // MatchGlob matches a path against a glob pattern
-func MatchGlob(pattern, path string) (bool, error) {
-	// Use filepath.Match for simple patterns
+func MatchGlob(pattern, filePath string) (bool, error) {
+	pattern = filepath.ToSlash(pattern)
+	filePath = filepath.ToSlash(filePath)
+
+	// Use slash-based matching so separators have the same semantics on every OS.
 	if !strings.Contains(pattern, "**") {
-		return filepath.Match(pattern, path)
+		return pathpkg.Match(pattern, filePath)
 	}
 
 	// For ** patterns, use custom matcher
@@ -289,5 +293,5 @@ func MatchGlob(pattern, path string) (bool, error) {
 		return false, err
 	}
 
-	return matcher.Match(path), nil
+	return matcher.Match(filePath), nil
 }

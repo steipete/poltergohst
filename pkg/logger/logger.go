@@ -37,6 +37,7 @@ func WithField(key string, value interface{}) Field {
 type TargetLogger struct {
 	logger     *logrus.Logger
 	targetName string
+	file       *os.File
 	mu         sync.RWMutex
 }
 
@@ -115,6 +116,7 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 // CreateLogger creates a new logger instance
 func CreateLogger(logFile string, logLevel string) Logger {
 	log := logrus.New()
+	var file *os.File
 
 	// Set log level
 	level, err := logrus.ParseLevel(logLevel)
@@ -131,7 +133,7 @@ func CreateLogger(logFile string, logLevel string) Logger {
 
 	// Add file output if specified
 	if logFile != "" {
-		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		file, err = os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err == nil {
 			multiWriter := io.MultiWriter(os.Stdout, file)
 			log.SetOutput(multiWriter)
@@ -140,6 +142,7 @@ func CreateLogger(logFile string, logLevel string) Logger {
 
 	return &TargetLogger{
 		logger: log,
+		file:   file,
 	}
 }
 
@@ -187,7 +190,30 @@ func (l *TargetLogger) WithTarget(target string) Logger {
 	return &TargetLogger{
 		logger:     l.logger,
 		targetName: target,
+		file:       l.file,
 	}
+}
+
+// Close releases resources owned by a logger.
+func Close(log Logger) error {
+	if closer, ok := log.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+// Close releases the logger's file output.
+func (l *TargetLogger) Close() error {
+	l.mu.Lock()
+	file := l.file
+	l.file = nil
+	l.logger.SetOutput(os.Stdout)
+	l.mu.Unlock()
+
+	if file != nil {
+		return file.Close()
+	}
+	return nil
 }
 
 // convertFields converts Field slice to logrus.Fields
