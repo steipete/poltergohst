@@ -23,14 +23,15 @@ type FSNotifyWatcher struct {
 	callbacks     map[string]func(FileEvent)
 	settling      time.Duration
 	pendingEvents map[string]pendingFSEvent
+	nextGeneration uint64
 	mu            sync.RWMutex
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
 
 type pendingFSEvent struct {
-	event     fsnotify.Event
-	updatedAt time.Time
+	event      fsnotify.Event
+	generation uint64
 }
 
 // NewFSNotifyWatcher creates a new fsnotify-based watcher
@@ -216,9 +217,11 @@ func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 	if pending, exists := f.pendingEvents[event.Name]; exists {
 		event.Op |= pending.event.Op
 	}
+	f.nextGeneration++
+	generation := f.nextGeneration
 	f.pendingEvents[event.Name] = pendingFSEvent{
-		event:     event,
-		updatedAt: time.Now(),
+		event:      event,
+		generation: generation,
 	}
 	settlingDelay := f.settling
 	f.mu.Unlock()
@@ -227,7 +230,7 @@ func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 	time.AfterFunc(settlingDelay, func() {
 		f.mu.Lock()
 		pending, exists := f.pendingEvents[event.Name]
-		if !exists || time.Since(pending.updatedAt) < settlingDelay {
+		if !exists || pending.generation != generation {
 			// Event was updated or removed, skip
 			f.mu.Unlock()
 			return
