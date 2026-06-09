@@ -29,6 +29,7 @@ type Manager struct {
 	processManager *process.Manager
 	poltergeist    *poltergeist.Poltergeist
 	mu             sync.RWMutex
+	running        bool
 }
 
 // Config represents daemon configuration
@@ -78,6 +79,23 @@ func (m *Manager) StartWithContext(ctx context.Context) error {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
+	started := false
+	defer func() {
+		if started {
+			return
+		}
+		m.processManager.Stop()
+		m.removePIDFile()
+		if m.poltergeist != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			m.poltergeist.StopWithContext(shutdownCtx)
+			cancel()
+			_ = m.poltergeist.Cleanup()
+		}
+		m.poltergeist = nil
+		m.running = false
+	}()
+
 	// Load configuration
 	cfg, err := m.loadConfig()
 	if err != nil {
@@ -103,10 +121,11 @@ func (m *Manager) StartWithContext(ctx context.Context) error {
 
 	// Start Poltergeist with context
 	if err := m.poltergeist.StartWithContext(ctx, ""); err != nil {
-		m.removePIDFile()
 		return fmt.Errorf("failed to start Poltergeist: %w", err)
 	}
 
+	m.running = true
+	started = true
 	m.logger.Info("Daemon started successfully")
 
 	// Run in background with context
@@ -142,6 +161,8 @@ func (m *Manager) StopWithContext(ctx context.Context) error {
 
 	// Remove PID file
 	m.removePIDFile()
+	m.poltergeist = nil
+	m.running = false
 
 	m.logger.Info("Daemon stopped")
 
@@ -225,6 +246,10 @@ func (m *Manager) run() {
 }
 
 func (m *Manager) isRunning() bool {
+	if m.running {
+		return true
+	}
+
 	pid, err := m.readPIDFile()
 	if err != nil {
 		return false

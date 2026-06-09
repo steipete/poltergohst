@@ -338,4 +338,13 @@ func TestDaemon_InvalidConfig(t *testing.T) {
 	if err == nil {
 		t.Error("expected error when starting with invalid config")
 	}
+
+	if d.IsRunning() {
+		t.Error("expected daemon not to be running after failed start")
+	}
+
+	pidFile := filepath.Join(tmpDir, ".poltergeist", "daemon.pid")
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("expected PID file to be removed after failed start, got %v", err)
+	}
 }
