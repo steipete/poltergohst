@@ -22,10 +22,15 @@ type FSNotifyWatcher struct {
 	exclusions    []string
 	callbacks     map[string]func(FileEvent)
 	settling      time.Duration
-	pendingEvents map[string]time.Time
+	pendingEvents map[string]pendingFSEvent
 	mu            sync.RWMutex
 	ctx           context.Context
 	cancel        context.CancelFunc
+}
+
+type pendingFSEvent struct {
+	event     fsnotify.Event
+	updatedAt time.Time
 }
 
 // NewFSNotifyWatcher creates a new fsnotify-based watcher
@@ -41,7 +46,7 @@ func NewFSNotifyWatcher(log logger.Logger) (*FSNotifyWatcher, error) {
 		watcher:       watcher,
 		logger:        log,
 		callbacks:     make(map[string]func(FileEvent)),
-		pendingEvents: make(map[string]time.Time),
+		pendingEvents: make(map[string]pendingFSEvent),
 		settling:      100 * time.Millisecond, // Default settling time
 		ctx:           ctx,
 		cancel:        cancel,
@@ -208,15 +213,21 @@ func (f *FSNotifyWatcher) processEvents() {
 // handleEventWithSettling handles an event with settling delay
 func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 	f.mu.Lock()
-	f.pendingEvents[event.Name] = time.Now()
+	if pending, exists := f.pendingEvents[event.Name]; exists {
+		event.Op |= pending.event.Op
+	}
+	f.pendingEvents[event.Name] = pendingFSEvent{
+		event:     event,
+		updatedAt: time.Now(),
+	}
 	settlingDelay := f.settling
 	f.mu.Unlock()
 
 	// Schedule event processing after settling delay
 	time.AfterFunc(settlingDelay, func() {
 		f.mu.Lock()
-		lastEventTime, exists := f.pendingEvents[event.Name]
-		if !exists || time.Since(lastEventTime) < settlingDelay {
+		pending, exists := f.pendingEvents[event.Name]
+		if !exists || time.Since(pending.updatedAt) < settlingDelay {
 			// Event was updated or removed, skip
 			f.mu.Unlock()
 			return
@@ -225,7 +236,7 @@ func (f *FSNotifyWatcher) handleEventWithSettling(event fsnotify.Event) {
 		f.mu.Unlock()
 
 		// Convert and dispatch event
-		fileEvent := f.convertEvent(event)
+		fileEvent := f.convertEvent(pending.event)
 		f.dispatchEvent(fileEvent)
 	})
 }

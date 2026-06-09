@@ -17,16 +17,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
       
+      - name: Determine lint baseline
+        id: lint-base
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            candidate="$BASE_SHA"
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            candidate="$BEFORE_SHA"
+          else
+            candidate="HEAD~1"
+          fi
+
+          if [[ "$candidate" =~ ^0+$ ]] || ! git cat-file -e "$candidate^{commit}" 2>/dev/null; then
+            candidate="HEAD~1"
+          fi
+
+          echo "rev=$candidate" >> "$GITHUB_OUTPUT"
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
-          args: --timeout=5m
+          version: v2.12.2
+          args: --timeout=5m --new-from-rev=${{ steps.lint-base.outputs.rev }}
 
   test:
     name: Test

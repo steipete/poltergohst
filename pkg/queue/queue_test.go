@@ -79,6 +79,11 @@ func (m *mockNotifier) NotifyBuildFailure(target string, err error) {
 	m.buildFailure = append(m.buildFailure, target)
 }
 func (m *mockNotifier) NotifyQueueStatus(active int, queued int) {}
+func (m *mockNotifier) buildFailureCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.buildFailure)
+}
 
 // Tests
 
@@ -337,8 +342,8 @@ func TestBuildQueue_BuildFailure(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Check notifications
-	if len(notifier.buildFailure) != 1 {
-		t.Errorf("expected 1 build failure notification, got %d", len(notifier.buildFailure))
+	if count := notifier.buildFailureCount(); count != 1 {
+		t.Errorf("expected 1 build failure notification, got %d", count)
 	}
 }
 

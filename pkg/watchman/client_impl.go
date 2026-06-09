@@ -400,6 +400,8 @@ func (c *UnifiedClient) handleWatchmanResponse(resp *WatchmanResponse) {
 func (c *UnifiedClient) processEvents() {
 	pendingEvents := make(map[string]*FileEvent)
 	timers := make(map[string]*time.Timer)
+	generations := make(map[string]uint64)
+	var pendingMu sync.Mutex
 
 	c.logger.Debug(fmt.Sprintf("Event processor started with settling delay: %v", c.settlingDelay))
 
@@ -411,28 +413,40 @@ func (c *UnifiedClient) processEvents() {
 
 		case event := <-c.eventChan:
 			c.logger.Debug(fmt.Sprintf("Processing event for: %s (type: %v)", event.Path, event.Type))
+			path := event.Path
+			eventCopy := event
+
+			pendingMu.Lock()
 			// Cancel existing timer if present
-			if timer, exists := timers[event.Path]; exists {
+			if timer, exists := timers[path]; exists {
 				timer.Stop()
-				delete(timers, event.Path)
+				delete(timers, path)
 			}
 
 			// Store pending event
-			pendingEvents[event.Path] = &event
+			generations[path]++
+			generation := generations[path]
+			pendingEvents[path] = &eventCopy
 
 			// Schedule dispatch after settling delay
 			timer := time.AfterFunc(c.settlingDelay, func() {
-				c.mu.Lock()
-				delete(timers, event.Path)
-				if pendingEvent, exists := pendingEvents[event.Path]; exists {
-					delete(pendingEvents, event.Path)
-					c.mu.Unlock()
+				pendingMu.Lock()
+				if generations[path] != generation {
+					pendingMu.Unlock()
+					return
+				}
+				delete(timers, path)
+				delete(generations, path)
+				if pendingEvent, exists := pendingEvents[path]; exists {
+					delete(pendingEvents, path)
+					pendingMu.Unlock()
 					c.dispatchEvent(*pendingEvent)
 				} else {
-					c.mu.Unlock()
+					pendingMu.Unlock()
 				}
 			})
-			timers[event.Path] = timer
+			timers[path] = timer
+			pendingMu.Unlock()
 		}
 	}
 }
