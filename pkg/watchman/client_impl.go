@@ -32,11 +32,12 @@ type UnifiedClient struct {
 }
 
 type subscription struct {
-	name       string
-	root       string
-	expression []interface{}
-	callback   interfaces.FileChangeCallback
-	query      SubscriptionQuery
+	name          string
+	root          string
+	expression    []interface{}
+	callback      interfaces.FileChangeCallback
+	eventCallback func(FileEvent)
+	query         SubscriptionQuery
 }
 
 // NewUnifiedClient creates a new unified Watchman/fsnotify client
@@ -77,12 +78,12 @@ func NewUnifiedClient(log logger.Logger, config *types.WatchmanConfig) *UnifiedC
 			if config.ExcludeDirs != nil {
 				client.fsnotifyWatcher.SetExclusions(config.ExcludeDirs)
 			}
-				if config.SettlingDelay > 0 {
-					client.fsnotifyWatcher.SetSettlingDelay(time.Duration(config.SettlingDelay) * time.Millisecond)
-				}
-				// FSNotifyWatcher already settles and coalesces events before forwarding them.
-				client.settlingDelay = 0
-			} else {
+			if config.SettlingDelay > 0 {
+				client.fsnotifyWatcher.SetSettlingDelay(time.Duration(config.SettlingDelay) * time.Millisecond)
+			}
+			// FSNotifyWatcher already settles and coalesces events before forwarding them.
+			client.settlingDelay = 0
+		} else {
 			log.Error(fmt.Sprintf("Failed to create fsnotify watcher: %v", err))
 		}
 	}
@@ -188,15 +189,27 @@ func (c *UnifiedClient) Subscribe(
 	callback interfaces.FileChangeCallback,
 	exclusions []interfaces.ExclusionExpression,
 ) error {
+	return c.subscribe(root, name, config, callback, nil, exclusions)
+}
+
+func (c *UnifiedClient) subscribe(
+	root string,
+	name string,
+	config interfaces.SubscriptionConfig,
+	callback interfaces.FileChangeCallback,
+	eventCallback func(FileEvent),
+	exclusions []interfaces.ExclusionExpression,
+) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Create subscription record
 	sub := &subscription{
-		name:       name,
-		root:       root,
-		expression: config.Expression,
-		callback:   callback,
+		name:          name,
+		root:          root,
+		expression:    config.Expression,
+		callback:      callback,
+		eventCallback: eventCallback,
 	}
 
 	if c.useWatchman {
@@ -461,6 +474,11 @@ func (c *UnifiedClient) dispatchEvent(event FileEvent) {
 	// Find matching subscriptions
 	for _, sub := range c.subscriptions {
 		if c.eventMatchesSubscription(event, sub) {
+			if sub.eventCallback != nil {
+				sub.eventCallback(event)
+				continue
+			}
+
 			// Convert to interface type
 			change := interfaces.FileChange{
 				Name:   event.Path,
@@ -616,31 +634,15 @@ func (c *UnifiedClient) Watch(ctx context.Context, root string, patterns []strin
 		Fields:     []string{"name", "size", "mtime_ms", "exists", "type"},
 	}
 
-	callback := func(changes []interfaces.FileChange) {
-		for _, change := range changes {
-			event := FileEvent{
-				Path:  change.Name,
-				IsDir: change.Type == "d",
-			}
-
-			if change.Exists {
-				event.Type = FileModified
-			} else {
-				event.Type = FileDeleted
-			}
-
-			// Check if it's a new file
-			if change.Type == "f" && change.Exists {
-				// Could check for "new" field from Watchman to determine if created
-				event.Type = FileCreated
-			}
-
-			events <- event
+	subscriptionName := fmt.Sprintf("watch-%d", time.Now().Unix())
+	eventCallback := func(event FileEvent) {
+		select {
+		case events <- event:
+		case <-ctx.Done():
 		}
 	}
 
-	subscriptionName := fmt.Sprintf("watch-%d", time.Now().Unix())
-	return c.Subscribe(root, subscriptionName, config, callback, nil)
+	return c.subscribe(root, subscriptionName, config, nil, eventCallback, nil)
 }
 
 // List returns all watched paths
